@@ -150,8 +150,7 @@ bool SomeFileOverlapsRange(const InternalKeyComparator& icmp,
     // Find the earliest possible internal key for smallest_user_key
     InternalKey small_key(*smallest_user_key, kMaxSequenceNumber,
                           kValueTypeForSeek);
-    index = 
-    (icmp, files, small_key.Encode());
+    index = FindFile(icmp, files, small_key.Encode());
   }
 
   if (index >= files.size()) {

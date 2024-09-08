@@ -82,8 +82,7 @@ class DBImpl : public DB {
     bool done;
     const InternalKey* begin;  // null means beginning of key range
     const InternalKey* end;    // null means end of key range
-    Interna
-    hhlKey tmp_storage;   // Used to keep track of compaction progress
+    InternalKey tmp_storage;   // Used to keep track of compaction progress
   };
 
   // Per level compaction stats.  stats_[level] stores the stats for

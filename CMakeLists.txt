@@ -120,6 +120,7 @@ add_library(leveldb "")
 target_sources(leveldb
   PRIVATE
     "${PROJECT_BINARY_DIR}/${LEVELDB_PORT_CONFIG_DIR}/port_config.h"
+    "app/main.cpp"
     "db/builder.cc"
     "db/builder.h"
     "db/c.cc"
@@ -388,6 +389,7 @@ if(LEVELDB_BUILD_TESTS)
   endfunction(leveldb_test)
 
   leveldb_test("db/c_test.c")
+  leveldb_test("app/main.cpp")
 
   if(NOT BUILD_SHARED_LIBS)
     # TODO(costan): This test also uses
