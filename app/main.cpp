@@ -5,7 +5,7 @@ int main() {
   leveldb::DB *db;
   leveldb::Options options;
   options.create_if_missing = true;
-  leveldb::Status status = leveldb::DB::Open(options, "/home/zhangnf/workspace/codes/cpp/CodeReview/runtime/file", &db);
+  leveldb::Status status = leveldb::DB::Open(options, "/home/zhangnf/workspace/codes/cpp/leveldb/runtime/file", &db);
   assert(status.ok());
   std::cout << "leveldb open success!" << std::endl;
   std::string value;
