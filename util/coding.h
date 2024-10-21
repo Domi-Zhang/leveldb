@@ -78,6 +78,7 @@ inline void EncodeFixed64(char* dst, uint64_t value) {
 // Lower-level versions of Get... that read directly from a character buffer
 // without any bounds checking.
 
+// 从ptr开始以小端字节序的方式读取一个4字节整形，ptr即header，前4个字节都是crc_sum
 inline uint32_t DecodeFixed32(const char* ptr) {
   const uint8_t* const buffer = reinterpret_cast<const uint8_t*>(ptr);
 

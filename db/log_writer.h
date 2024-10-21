@@ -6,6 +6,7 @@
 #define STORAGE_LEVELDB_DB_LOG_WRITER_H_
 
 #include <cstdint>
+#include <cstddef>
 
 #include "db/log_format.h"
 #include "leveldb/slice.h"
@@ -40,7 +41,7 @@ class Writer {
   Status EmitPhysicalRecord(RecordType type, const char* ptr, size_t length);
 
   WritableFile* dest_;
-  int block_offset_;  // Current offset in block
+  size_t block_offset_;  // Current offset in block
 
   // crc32c values for all supported record types.  These are
   // pre-computed to reduce the overhead of computing the crc of the
