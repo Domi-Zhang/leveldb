@@ -31,6 +31,10 @@ Reader::Reader(SequentialFile* file, Reporter* reporter, bool checksum,
 Reader::~Reader() { delete[] backing_store_; }
 
 bool Reader::SkipToInitialBlock() {
+  // 【注意】是skip到initial_offset_所在block的开始位置，并不是真正的initial_offset_所指位置
+  // 这里offset_in_block并不会用于确定skip read的位置，只是用来判断initial_offset_是不是
+  // 处在block的尾部，而且小于一个header的size，这种情况下initial_offset_根本不可能指向一个
+  // 合法的数据记录，直接调到initial_offset_所在block的下一个block
   const size_t offset_in_block = initial_offset_ % kBlockSize;
   uint64_t block_start_location = initial_offset_ - offset_in_block;
 
@@ -77,6 +81,9 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
     uint64_t physical_record_offset =
         end_of_buffer_offset_ - buffer_.size() - kHeaderSize - fragment.size();
 
+    // 这里有可能读到kMiddleType或kLastType，但实际在这之前并没有kFirstType，说明跳过
+    // initial_offset_后读到了一个正确(非kBadRecord或kEof)的错误值(没有前置的kFirstType)
+    // ，需要丢弃。
     if (resyncing_) {
       if (record_type == kMiddleType) {
         continue;
@@ -84,6 +91,7 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
         resyncing_ = false;
         continue;
       } else {
+        // 即使是kBadRecord或kEof也没关系，结束resyncing_状态，由下面的switch进行处理
         resyncing_ = false;
       }
     }
@@ -99,6 +107,7 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
             ReportCorruption(scratch->size(), "partial record without end(1)");
           }
         }
+        // physical_record_offset等于当前block读取的起始offset
         prospective_record_offset = physical_record_offset;
         scratch->clear();
         *record = fragment;
@@ -215,10 +224,13 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
 
     // Parse the header
     const char* header = buffer_.data();
+    // header的第4、5个字节是小端字节序编码的length
     const uint32_t a = static_cast<uint32_t>(header[4]) & 0xff;
     const uint32_t b = static_cast<uint32_t>(header[5]) & 0xff;
     const unsigned int type = header[6];
     const uint32_t length = a | (b << 8);
+    // 参见Writer::EmitPhysicalRecord，其最后一个参数即写入的length，总是等于等于
+    // kBlockSize-kHeaderSize
     if (kHeaderSize + length > buffer_.size()) {
       size_t drop_size = buffer_.size();
       buffer_.clear();
@@ -256,9 +268,17 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       }
     }
 
+    // 跳过当前的block
     buffer_.remove_prefix(kHeaderSize + length);
 
     // Skip physical record that started before initial_offset_
+    // 上一行代码中buffer_.remove_prefix(kHeaderSize + length)实际执行的是
+    // buffer_.size()-(kHeaderSize + length)，那么下面这行代码可以看作：
+    // = end_of_buffer_offset_ - (buffer_.size() + kHeaderSize + length)
+    // = end_of_buffer_offset_ - 原始buffer大小
+    // 又因为end_of_buffer_offset_ = 当前block的读取的起始offset+原始buffer大小
+    // 下面的判断为：当前block的读取的起始offset 是否小于 initial_offset_
+    // 即当前block读取的起始offset小于initial_offset_，扔掉当前这个block
     if (end_of_buffer_offset_ - buffer_.size() - kHeaderSize - length <
         initial_offset_) {
       result->clear();
