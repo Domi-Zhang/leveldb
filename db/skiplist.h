@@ -152,12 +152,14 @@ struct SkipList<Key, Comparator>::Node {
     assert(n >= 0);
     // Use an 'acquire load' so that we observe a fully initialized
     // version of the returned Node.
+    // memory_order_acquire用于获取数据，放在读操作的最开始
     return next_[n].load(std::memory_order_acquire);
   }
   void SetNext(int n, Node* x) {
     assert(n >= 0);
     // Use a 'release store' so that anybody who reads through this
     // pointer observes a fully initialized version of the inserted node.
+    // memory_order_release用于发布数据，放在写操作的最后
     next_[n].store(x, std::memory_order_release);
   }
 
@@ -353,6 +355,9 @@ void SkipList<Key, Comparator>::Insert(const Key& key) {
     // the loop below.  In the former case the reader will
     // immediately drop to the next level since nullptr sorts after all
     // keys.  In the latter case the reader will use the new node.
+    // 因为skiplist从low level的节点读总是正确的，所以max_height_在header_的high level
+    // 指针更新前后都可以，只是当原本有high level指针时，却因为max_height_未及时更新导致从low
+    // level指针读，性能会稍微差点。就像数据库有索引添加了，但索引标志没有读到导致还是走了全表扫描
     max_height_.store(height, std::memory_order_relaxed);
   }
 
