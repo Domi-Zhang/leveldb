@@ -286,6 +286,7 @@ SkipList<Key, Comparator>::FindLessThan(const Key& key) const {
   Node* x = head_;
   int level = GetMaxHeight() - 1;
   while (true) {
+    // 在skiplist中，compare_(a,b)返回值>0表示a排b的前面，<0则相反
     assert(x == head_ || compare_(x->key, key) < 0);
     Node* next = x->Next(level);
     if (next == nullptr || compare_(next->key, key) >= 0) {
@@ -301,6 +302,7 @@ SkipList<Key, Comparator>::FindLessThan(const Key& key) const {
   }
 }
 
+// 就是头结点不断去接近nullptr，直到level=0，就是last节点了
 template <typename Key, class Comparator>
 typename SkipList<Key, Comparator>::Node* SkipList<Key, Comparator>::FindLast()
     const {

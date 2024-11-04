@@ -108,7 +108,9 @@ const char* GetVarint32PtrFallback(const char* p, const char* limit,
                                    uint32_t* value);
 inline const char* GetVarint32Ptr(const char* p, const char* limit,
                                   uint32_t* value) {
+  // p < limit是正常情况下应有的状态，否则是一个非法状态
   if (p < limit) {
+    // 这里尝试看看是不是一个小于128的可变数字，如果是的话直接返回，不用循环
     uint32_t result = *(reinterpret_cast<const uint8_t*>(p));
     if ((result & 128) == 0) {
       *value = result;

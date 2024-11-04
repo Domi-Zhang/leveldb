@@ -22,9 +22,10 @@ void PutFixed64(std::string* dst, uint64_t value) {
 // 核心思路： 128 = 10000000，如果某个bytes满足 < 128，这个byte的最高位一定是0
 // 相反varint里面设置这个数为1， decode的时候，根据每个byte的最高位是否为1来判断结束
 // 就是利用byte = 8bits的最高位来判断是否结束
+// 小端字节序
 char* EncodeVarint32(char* dst, uint32_t v) {
   // Operate on characters as unsigneds
-  uint8_t* ptr = reinterpret_cast<uint8_t*>(dst);
+  auto* ptr = reinterpret_cast<uint8_t*>(dst);
   static const int B = 128;
   if (v < (1 << 7)) {
     *(ptr++) = v;
@@ -99,7 +100,7 @@ const char* GetVarint32PtrFallback(const char* p, const char* limit,
     } else {
       result |= (byte << shift);
       *value = result;
-      return reinterpret_cast<const char*>(p);
+      return p;
     }
   }
   return nullptr;
@@ -128,7 +129,7 @@ const char* GetVarint64Ptr(const char* p, const char* limit, uint64_t* value) {
     } else {
       result |= (byte << shift);
       *value = result;
-      return reinterpret_cast<const char*>(p);
+      return p;
     }
   }
   return nullptr;

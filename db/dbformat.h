@@ -14,6 +14,7 @@
 #include "leveldb/filter_policy.h"
 #include "leveldb/slice.h"
 #include "leveldb/table_builder.h"
+
 #include "util/coding.h"
 #include "util/logging.h"
 
@@ -194,13 +195,26 @@ class LookupKey {
   ~LookupKey();
 
   // Return a key suitable for lookup in a MemTable.
-  Slice memtable_key() const { return Slice(start_, end_ - start_); }
+  Slice memtable_key() const {
+    // varint32 + uint64 至少是9个字节
+    assert((end_ - start_ - 9) >= 0);
+    return {start_, static_cast<size_t>(end_ - start_)};
+  }
 
   // Return an internal key (suitable for passing to an internal iterator)
-  Slice internal_key() const { return Slice(kstart_, end_ - kstart_); }
+  // | User key (string) | sequence number (7 bytes) | value type (1 byte) |
+  Slice internal_key() const {
+    // uint64 8个字节，下面这个断言表示“end_ - kstart_”至少有一个tag长度
+    assert((end_ - kstart_) >= 8);
+    return {kstart_, static_cast<size_t>(end_ - kstart_)};
+  }
 
   // Return the user key
-  Slice user_key() const { return Slice(kstart_, end_ - kstart_ - 8); }
+  Slice user_key() const {
+    // uint64 8个字节，下面这个断言表示“end_ - kstart_ - tag”不为负数
+    assert((end_ - kstart_ - 8) >= 0);
+    return {kstart_, static_cast<size_t>(end_ - kstart_ - 8)};
+  }
 
  private:
   // We construct a char array of the form:
@@ -208,6 +222,7 @@ class LookupKey {
   //    userkey  char[klength]          <-- kstart_
   //    tag      uint64
   //                                    <-- end_
+  // tag = | sequence number (7 bytes) | value type (1 byte) | = 8bytes
   // The array is a suitable MemTable key.
   // The suffix starting with "userkey" can be used as an InternalKey.
   const char* start_;

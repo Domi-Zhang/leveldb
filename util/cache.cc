@@ -122,19 +122,27 @@ class HandleTable {
 
   void Resize() {
     uint32_t new_length = 4;
+    // Resize方法被调用的时候，elems_肯定是>上一次的new_length的，比如上一次resizeh
+    // 的new_length=8，那么现在elems_肯定至少是9，所以相当于每次都翻倍。此处的while只是为了
+    // 指定length时初始化elems_
     while (new_length < elems_) {
       new_length *= 2;
     }
-    LRUHandle** new_list = new LRUHandle*[new_length];
-    memset(new_list, 0, sizeof(new_list[0]) * new_length);
+    auto** new_list = new LRUHandle*[new_length];
+    memset(new_list, 0, sizeof(LRUHandle*) * new_length);
     uint32_t count = 0;
+    // 循环每个链表
     for (uint32_t i = 0; i < length_; i++) {
       LRUHandle* h = list_[i];
+      // 循环链表中的每个元素
       while (h != nullptr) {
         LRUHandle* next = h->next_hash;
         uint32_t hash = h->hash;
         LRUHandle** ptr = &new_list[hash & (new_length - 1)];
+        // 下面两步组成头插法的重散列过程
+        // 设置h的next_hash指向链表头
         h->next_hash = *ptr;
+        // 设置链表头指向h
         *ptr = h;
         h = next;
         count++;
