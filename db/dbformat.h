@@ -105,6 +105,8 @@ class InternalKeyComparator : public Comparator {
   const Comparator* user_comparator_;
 
  public:
+  // 此处构造参数c由main方法的options.comparator传入，默认为BytewiseComparator，参见
+  // options.cc
   explicit InternalKeyComparator(const Comparator* c) : user_comparator_(c) {}
   const char* Name() const override;
   int Compare(const Slice& a, const Slice& b) const override;

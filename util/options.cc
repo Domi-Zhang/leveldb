@@ -9,6 +9,7 @@
 
 namespace leveldb {
 
+// 实现默认构造函数
 Options::Options() : comparator(BytewiseComparator()), env(Env::Default()) {}
 
 }  // namespace leveldb
