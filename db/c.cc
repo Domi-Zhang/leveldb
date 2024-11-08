@@ -172,7 +172,7 @@ leveldb_t* leveldb_open(const leveldb_options_t* options, const char* name,
   if (SaveError(errptr, DB::Open(options->rep, std::string(name), &db))) {
     return nullptr;
   }
-  leveldb_t* result = new leveldb_t;
+  auto* result = new leveldb_t;
   result->rep = db;
   return result;
 }
@@ -219,13 +219,13 @@ char* leveldb_get(leveldb_t* db, const leveldb_readoptions_t* options,
 
 leveldb_iterator_t* leveldb_create_iterator(
     leveldb_t* db, const leveldb_readoptions_t* options) {
-  leveldb_iterator_t* result = new leveldb_iterator_t;
+  auto* result = new leveldb_iterator_t;
   result->rep = db->rep->NewIterator(options->rep);
   return result;
 }
 
 const leveldb_snapshot_t* leveldb_create_snapshot(leveldb_t* db) {
-  leveldb_snapshot_t* result = new leveldb_snapshot_t;
+  auto* result = new leveldb_snapshot_t;
   result->rep = db->rep->GetSnapshot();
   return result;
 }
@@ -252,7 +252,7 @@ void leveldb_approximate_sizes(leveldb_t* db, int num_ranges,
                                const char* const* range_limit_key,
                                const size_t* range_limit_key_len,
                                uint64_t* sizes) {
-  Range* ranges = new Range[num_ranges];
+  auto* ranges = new Range[num_ranges];
   for (int i = 0; i < num_ranges; i++) {
     ranges[i].start = Slice(range_start_key[i], range_start_key_len[i]);
     ranges[i].limit = Slice(range_limit_key[i], range_limit_key_len[i]);
@@ -436,7 +436,7 @@ leveldb_comparator_t* leveldb_comparator_create(
     int (*compare)(void*, const char* a, size_t alen, const char* b,
                    size_t blen),
     const char* (*name)(void*)) {
-  leveldb_comparator_t* result = new leveldb_comparator_t;
+  auto* result = new leveldb_comparator_t;
   result->state_ = state;
   result->destructor_ = destructor;
   result->compare_ = compare;
@@ -454,7 +454,7 @@ leveldb_filterpolicy_t* leveldb_filterpolicy_create(
     uint8_t (*key_may_match)(void*, const char* key, size_t length,
                              const char* filter, size_t filter_length),
     const char* (*name)(void*)) {
-  leveldb_filterpolicy_t* result = new leveldb_filterpolicy_t;
+  auto* result = new leveldb_filterpolicy_t;
   result->state_ = state;
   result->destructor_ = destructor;
   result->create_ = create_filter;

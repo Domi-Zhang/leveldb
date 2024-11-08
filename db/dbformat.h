@@ -69,10 +69,10 @@ static const SequenceNumber kMaxSequenceNumber = ((0x1ull << 56) - 1);
 
 struct ParsedInternalKey {
   Slice user_key;
-  SequenceNumber sequence;
+  SequenceNumber sequence{};
   ValueType type;
 
-  ParsedInternalKey() {}  // Intentionally left uninitialized (for speed)
+  ParsedInternalKey() = default;  // Intentionally left uninitialized (for speed)
   ParsedInternalKey(const Slice& u, const SequenceNumber& seq, ValueType t)
       : user_key(u), sequence(seq), type(t) {}
   std::string DebugString() const;
@@ -95,7 +95,7 @@ bool ParseInternalKey(const Slice& internal_key, ParsedInternalKey* result);
 // Returns the user key portion of an internal key.
 inline Slice ExtractUserKey(const Slice& internal_key) {
   assert(internal_key.size() >= 8);
-  return Slice(internal_key.data(), internal_key.size() - 8);
+  return {internal_key.data(), internal_key.size() - 8};
 }
 
 // A comparator for internal keys that uses a specified comparator for
@@ -140,7 +140,7 @@ class InternalKey {
   std::string rep_;
 
  public:
-  InternalKey() {}  // Leave rep_ as empty to indicate it is invalid
+  InternalKey() = default;  // Leave rep_ as empty to indicate it is invalid
   InternalKey(const Slice& user_key, SequenceNumber s, ValueType t) {
     AppendInternalKey(&rep_, ParsedInternalKey(user_key, s, t));
   }
