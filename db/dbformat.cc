@@ -76,6 +76,9 @@ void InternalKeyComparator::FindShortestSeparator(std::string* start,
       user_comparator_->Compare(user_start, tmp) < 0) {
     // User key has become shorter physically, but larger logically.
     // Tack on the earliest possible number to the shortened user key.
+    // internal_key的格式为“| User key (string) | sequence number (7 bytes) | value type (1 byte) |”
+    // 下面这行代码就是在tmp的后面追加“| sequence number (7 bytes) | value type (1 byte) |”
+    // 其中kMaxSequenceNumber是7个字节全1的sequence number（最大），kValueTypeForSeek是dataType（1）
     PutFixed64(&tmp,
                PackSequenceAndType(kMaxSequenceNumber, kValueTypeForSeek));
     assert(this->Compare(*start, tmp) < 0);
