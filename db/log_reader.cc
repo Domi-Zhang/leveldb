@@ -81,9 +81,6 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
     uint64_t physical_record_offset =
         end_of_buffer_offset_ - buffer_.size() - kHeaderSize - fragment.size();
 
-    // 这里有可能读到kMiddleType或kLastType，但实际在这之前并没有kFirstType，说明跳过
-    // initial_offset_后读到了一个正确(非kBadRecord或kEof)的错误值(没有前置的kFirstType)
-    // ，需要丢弃。
     if (resyncing_) {
       if (record_type == kMiddleType) {
         continue;
@@ -91,7 +88,6 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
         resyncing_ = false;
         continue;
       } else {
-        // 即使是kBadRecord或kEof也没关系，结束resyncing_状态，由下面的switch进行处理
         resyncing_ = false;
       }
     }
@@ -107,7 +103,6 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
             ReportCorruption(scratch->size(), "partial record without end(1)");
           }
         }
-        // physical_record_offset等于当前block读取的起始offset
         prospective_record_offset = physical_record_offset;
         scratch->clear();
         *record = fragment;
@@ -228,7 +223,7 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
     const uint32_t a = static_cast<uint32_t>(header[4]) & 0xff;
     const uint32_t b = static_cast<uint32_t>(header[5]) & 0xff;
     const unsigned int type = header[6];
-    const uint32_t length = a | (b << 8);
+    const size_t length = a | (b << 8);
     // 参见Writer::EmitPhysicalRecord，其最后一个参数即写入的length，总是等于等于
     // kBlockSize-kHeaderSize
     if (kHeaderSize + length > buffer_.size()) {

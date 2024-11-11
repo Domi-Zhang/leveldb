@@ -101,6 +101,7 @@ void MemTable::Add(SequenceNumber s, ValueType type, const Slice& key,
   std::memcpy(p, value.data(), val_size);
 
   // 综上，memtable的entry格式为： internal_key_size + internal key  + value size + value
+  // 其中internal key size = user key size + 8（7 seq num & 1 type）
   assert(p + val_size == buf + encoded_len);
   table_.Insert(buf);
 }
