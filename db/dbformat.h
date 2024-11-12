@@ -198,8 +198,9 @@ class LookupKey {
 
   // Return a key suitable for lookup in a MemTable.
   Slice memtable_key() const {
-    // varint32 + uint64 至少是9个字节
-    assert((end_ - start_ - 9) >= 0);
+    // 包含seqNum和type的key
+    // varint32 + userKey + uint64 至少是9个字节（当userKey=0时就是9个字节）
+    assert((end_ - start_) >= 9);
     return {start_, static_cast<size_t>(end_ - start_)};
   }
 
