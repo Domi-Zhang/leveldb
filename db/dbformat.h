@@ -198,8 +198,8 @@ class LookupKey {
 
   // Return a key suitable for lookup in a MemTable.
   Slice memtable_key() const {
-    // varint32 + uint64 至少是9个字节
-    assert((end_ - start_ - 9) >= 0);
+    // varint32(>=1) + userKey(>=0) + uint64(8) 至少是9个字节
+    assert((end_ - start_) >= 9);
     return {start_, static_cast<size_t>(end_ - start_)};
   }
 
@@ -213,8 +213,8 @@ class LookupKey {
 
   // Return the user key
   Slice user_key() const {
-    // uint64 8个字节，下面这个断言表示“end_ - kstart_ - tag”不为负数
-    assert((end_ - kstart_ - 8) >= 0);
+    // uint64 8个字节，下面这个断言表示“end_ - kstart_”至少有一个tag的长度
+    assert((end_ - kstart_) >= 8);
     return {kstart_, static_cast<size_t>(end_ - kstart_ - 8)};
   }
 
