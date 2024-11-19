@@ -61,8 +61,8 @@ size_t BlockBuilder::CurrentSizeEstimate() const {
 
 Slice BlockBuilder::Finish() {
   // Append restart array
-  for (size_t i = 0; i < restarts_.size(); i++) {
-    PutFixed32(&buffer_, restarts_[i]);
+  for (unsigned int restart : restarts_) {
+    PutFixed32(&buffer_, restart);
   }
   PutFixed32(&buffer_, restarts_.size());
   finished_ = true;
@@ -100,6 +100,7 @@ void BlockBuilder::Add(const Slice& key, const Slice& value) {
   PutVarint32(&buffer_, value.size());
 
   // Add string delta to buffer_ followed by value
+  // key.data()是一个指针，加上shared表示跳过shared字节到non_shared位置
   buffer_.append(key.data() + shared, non_shared);
   buffer_.append(value.data(), value.size());
 
