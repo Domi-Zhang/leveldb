@@ -87,8 +87,7 @@ void Table::ReadMeta(const Footer& footer) {
     return;  // Do not need any metadata
   }
 
-  // TODO(sanjay): Skip this if footer.metaindex_handle() size indicates
-  // it is an empty block.
+  // TODO(sanjay): Skip this if footer.metaindex_handle() size indicates it is an empty block.
   ReadOptions opt;
   if (rep_->options.paranoid_checks) {
     opt.verify_checksums = true;
