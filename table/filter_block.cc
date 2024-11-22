@@ -19,6 +19,10 @@ FilterBlockBuilder::FilterBlockBuilder(const FilterPolicy* policy)
     : policy_(policy) {}
 
 void FilterBlockBuilder::StartBlock(uint64_t block_offset) {
+  // 此处的block_offset是用来限定一个Filter最小构建粒度为kFilterBase，当Generate间隔
+  // 不到一个kFilterBase时不会生成新的Filter，当Generate间隔超过kFilterBase时会按
+  // kFilterBase的数量生成多条记录到filter_offsets，但它们指向的Filter都是同一个。
+  // 注意Filter的数量可能和Block的数量不一致
   uint64_t filter_index = (block_offset / kFilterBase);
   assert(filter_index >= filter_offsets_.size());
   while (filter_index > filter_offsets_.size()) {
@@ -28,6 +32,7 @@ void FilterBlockBuilder::StartBlock(uint64_t block_offset) {
 
 void FilterBlockBuilder::AddKey(const Slice& key) {
   Slice k = key;
+  // start中每一个元素代表的都是keys(std::string)中的offset
   start_.push_back(keys_.size());
   keys_.append(k.data(), k.size());
 }

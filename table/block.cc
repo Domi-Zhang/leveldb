@@ -80,6 +80,8 @@ static inline const char* DecodeEntry(const char* p, const char* limit,
     if ((p = GetVarint32Ptr(p, limit, value_length)) == nullptr) return nullptr;
   }
 
+  // 现在P指针之后是 non_shared content (len=non_shared)和 value content(len=value_length)
+  // 所以如果p+(*non_shared + *value_length)>limit，那就是非法越界了
   if (static_cast<uint32_t>(limit - p) < (*non_shared + *value_length)) {
     return nullptr;
   }
@@ -207,6 +209,7 @@ class Block::Iter : public Iterator {
       const char* key_ptr =
           DecodeEntry(data_ + region_offset, data_ + restarts_, &shared,
                       &non_shared, &value_length);
+      // 现在找的都是restart point，shared应该是0
       if (key_ptr == nullptr || (shared != 0)) {
         CorruptionError();
         return;

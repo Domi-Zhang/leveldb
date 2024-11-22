@@ -59,7 +59,7 @@ void PutVarint32(std::string* dst, uint32_t v) {
 
 char* EncodeVarint64(char* dst, uint64_t v) {
   static const int B = 128;
-  uint8_t* ptr = reinterpret_cast<uint8_t*>(dst);
+  auto* ptr = reinterpret_cast<uint8_t*>(dst);
   while (v >= B) {
     *(ptr++) = v | B;
     v >>= 7;
