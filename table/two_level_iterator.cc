@@ -78,6 +78,8 @@ TwoLevelIterator::TwoLevelIterator(Iterator* index_iter,
     : block_function_(block_function),
       arg_(arg),
       options_(options),
+      // 参数中的index_iter是在Table::NewIterator中通过table->index_block
+      // 的NewIterator方法构造而来
       index_iter_(index_iter),
       data_iter_(nullptr) {}
 
@@ -85,10 +87,14 @@ TwoLevelIterator::~TwoLevelIterator() = default;
 
 // 借助seek，看看如何实现two level的iterator
 void TwoLevelIterator::Seek(const Slice& target) {
-  // 通过block iterator定位block meta index (offset, len)
+  // 通过block iterator定位block meta index (offset, size)
   index_iter_.Seek(target);
-  // 获取block内容的iterator
+  // 通过index初始化block data的iterator
   InitDataBlock();
+  // 注意index.Seek获得的key是>=target的第一个key，这个key又大于所对应data block中所有
+  // key，所以实际上要去后续的data block去Seek，详见TableBuilder::Rep::index_block
+  // 的注释。此时data_iter_不为nullptr且也是Valid的，所以需要一次没用的Seek才能保证
+  // SkipEmptyDataBlocksForward中的while条件成立
   if (data_iter_.iter() != nullptr) data_iter_.Seek(target);
   SkipEmptyDataBlocksForward();
 }
@@ -96,6 +102,8 @@ void TwoLevelIterator::Seek(const Slice& target) {
 void TwoLevelIterator::SeekToFirst() {
   index_iter_.SeekToFirst();
   InitDataBlock();
+  // 此处与Seek(target)不一样的地方就在于SeekToFirst是有效的，后面
+  // SkipEmptyDataBlocksForward方法会因为!Valid()不成立而不会执行
   if (data_iter_.iter() != nullptr) data_iter_.SeekToFirst();
   SkipEmptyDataBlocksForward();
 }
@@ -127,6 +135,7 @@ void TwoLevelIterator::SkipEmptyDataBlocksForward() {
       return;
     }
     index_iter_.Next();
+    // 通过index_iter_获取data block的handle并构造为iter设置给data_iter_
     InitDataBlock();
     if (data_iter_.iter() != nullptr) data_iter_.SeekToFirst();
   }
@@ -166,6 +175,7 @@ void TwoLevelIterator::InitDataBlock() {
       Iterator* iter = (*block_function_)(arg_, options_, handle);
       // set current data block handle & data block iter
       data_block_handle_.assign(handle.data(), handle.size());
+      // 设置data_iter为iter
       SetDataIterator(iter);
     }
   }

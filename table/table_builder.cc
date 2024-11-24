@@ -43,6 +43,13 @@ struct TableBuilder::Rep {
   // data block 和 index block都是通过block builder来构建
   // 这两者在物理存储逻辑上没什么区别，也有key share prefix 
   BlockBuilder data_block;
+  // 假如data_block序列如下
+  // ------------------------------------------
+  // offset     1         17
+  // data key   a1 a2 a3  d1 d2 d3
+  // ------------------------------------------
+  // 在a3处flush，在d3处finish，那么index_block中就会有如下kv:
+  // c->(offset=1, size=3), e->(offset=17, size=3)
   BlockBuilder index_block;
   std::string last_key;
   int64_t num_entries;
