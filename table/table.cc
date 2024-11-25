@@ -87,8 +87,7 @@ void Table::ReadMeta(const Footer& footer) {
     return;  // Do not need any metadata
   }
 
-  // TODO(sanjay): Skip this if footer.metaindex_handle() size indicates
-  // it is an empty block.
+  // TODO(sanjay): Skip this if footer.metaindex_handle() size indicates it is an empty block.
   ReadOptions opt;
   if (rep_->options.paranoid_checks) {
     opt.verify_checksums = true;
@@ -105,6 +104,7 @@ void Table::ReadMeta(const Footer& footer) {
   key.append(rep_->options.filter_policy->Name());
   iter->Seek(key);
   if (iter->Valid() && iter->key() == Slice(key)) {
+    // iter->value()的值是Filter的offset和limit，需要在ReadFilter中再次路有
     ReadFilter(iter->value());
   }
   delete iter;
@@ -125,6 +125,7 @@ void Table::ReadFilter(const Slice& filter_handle_value) {
     opt.verify_checksums = true;
   }
   BlockContents block;
+  // 将Filter的内容读入到block变量中
   if (!ReadBlock(rep_->file, opt, filter_handle, &block).ok()) {
     return;
   }
@@ -217,6 +218,7 @@ Iterator* Table::BlockReader(void* arg, const ReadOptions& options,
 // l0层的sstable file的迭代器
 Iterator* Table::NewIterator(const ReadOptions& options) const {
   return NewTwoLevelIterator(
+      // rep_->index_block是在Open方法中构建的，是一个Block
       rep_->index_block->NewIterator(rep_->options.comparator),
       &Table::BlockReader, const_cast<Table*>(this), options);
 }

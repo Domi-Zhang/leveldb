@@ -14,6 +14,8 @@ namespace leveldb {
 
 struct Options;
 
+// block builder本身是由状态机(counter、finished等)及buffer(std::string)组成，主要提供
+// Add(k,v)和Flush方法(返回std::string)
 class BlockBuilder {
  public:
   explicit BlockBuilder(const Options* options);

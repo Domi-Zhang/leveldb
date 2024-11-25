@@ -21,6 +21,7 @@ void BlockHandle::EncodeTo(std::string* dst) const {
 }
 
 Status BlockHandle::DecodeFrom(Slice* input) {
+  // input是一个指针，GetVarint64会修改input原始值，每当获取一个int64后，input就截断到后面去
   if (GetVarint64(input, &offset_) && GetVarint64(input, &size_)) {
     return Status::OK();
   } else {

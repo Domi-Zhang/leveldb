@@ -25,6 +25,7 @@ class BloomFilterPolicy : public FilterPolicy {
 
   const char* Name() const override { return "leveldb.BuiltinBloomFilter2"; }
 
+  // 为什么下面的代码中 array 要用&(*dst)[init_size]的方式去获取
   void CreateFilter(const Slice* keys, int n, std::string* dst) const override {
     // Compute bloom filter size (in both bits and bytes)
     size_t bits = n * bits_per_key_;
@@ -81,6 +82,7 @@ class BloomFilterPolicy : public FilterPolicy {
 
  private:
   size_t bits_per_key_;
+  // 哈希函数的数量，k的最优解是(m/n)ln(2)，其中m为bit长度，n是key数，所以m/n=bits_per_key_
   size_t k_;
 };
 }  // namespace

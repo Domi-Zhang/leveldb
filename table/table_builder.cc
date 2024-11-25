@@ -43,6 +43,13 @@ struct TableBuilder::Rep {
   // data block 和 index block都是通过block builder来构建
   // 这两者在物理存储逻辑上没什么区别，也有key share prefix 
   BlockBuilder data_block;
+  // 假如data_block序列如下
+  // ------------------------------------------
+  // offset     1         17
+  // data key   a1 a2 a3  d1 d2 d3
+  // ------------------------------------------
+  // 在a3处flush，在d3处finish，那么index_block中就会有如下kv:
+  // c->(offset=1, size=3), e->(offset=17, size=3)
   BlockBuilder index_block;
   std::string last_key;
   int64_t num_entries;
@@ -139,12 +146,15 @@ void TableBuilder::Flush() {
   if (!ok()) return;
   if (r->data_block.empty()) return;
   assert(!r->pending_index_entry);
+  // 将data_block写入到r->file，并Reset
+  // pending_handle会被设置成当前写入的这个block的offset和size
   WriteBlock(&r->data_block, &r->pending_handle);
   if (ok()) {
     r->pending_index_entry = true;
     r->status = r->file->Flush();
   }
   if (r->filter_block != nullptr) {
+    // 此时的offset指向刚写入的block之后的位置，也就是说filter_block中记录的都是开始位置
     r->filter_block->StartBlock(r->offset);
   }
 }
@@ -189,6 +199,9 @@ void TableBuilder::WriteBlock(BlockBuilder* block, BlockHandle* handle) {
   block->Reset();
 }
 
+// 将block_contents写入到rep_->file中，写入内容包括:
+// “block_contents的data和5个字节的tailer(1byte compress_type & 4 byte crc)”
+// 这个方法会将handle的offset和size设置为当前offset(上个block的结尾，eg.这个block的开始)
 void TableBuilder::WriteRawBlock(const Slice& block_contents,
                                  CompressionType type, BlockHandle* handle) {
   Rep* r = rep_;
@@ -212,6 +225,7 @@ Status TableBuilder::status() const { return rep_->status; }
 
 Status TableBuilder::Finish() {
   Rep* r = rep_;
+  // 注意这里！！！
   Flush();
   assert(!r->closed);
   r->closed = true;
@@ -231,6 +245,8 @@ Status TableBuilder::Finish() {
     // filter block只有一个，所以记录只有一条
     if (r->filter_block != nullptr) {
       // Add mapping from "filter.Name" to location of filter data
+      // footer.metaindex_handle --> meta_index(目前只有一个entry，就是filter)
+      // meta_index --> bloomfilter
       std::string key = "filter.";
       key.append(r->options.filter_policy->Name());
       std::string handle_encoding;
@@ -252,12 +268,16 @@ Status TableBuilder::Finish() {
       r->index_block.Add(r->last_key, Slice(handle_encoding));
       r->pending_index_entry = false;
     }
+    // index block的层次结构比meta index block少一个层级，footer中的index_handle直接
+    // 指向真正的index block，这是因为index block只有这一种，而meta设计成可以有多种(虽然
+    // 目前只有filter一种)，所以meta到filter多一层映射
     WriteBlock(&r->index_block, &index_block_handle);
   }
 
   // Write footer
   if (ok()) {
     Footer footer;
+    // 参见上面meta_index_block构造说明
     footer.set_metaindex_handle(metaindex_block_handle);
     footer.set_index_handle(index_block_handle);
     std::string footer_encoding;
