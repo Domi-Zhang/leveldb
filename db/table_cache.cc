@@ -38,6 +38,12 @@ TableCache::TableCache(const std::string& dbname, const Options& options,
 
 TableCache::~TableCache() { delete cache_; }
 
+// 从cache_(LRUCache)中读取key为file_number的TableAndFile，否则从ldb或sst文件中读取
+// struct TableAndFile {
+//   RandomAccessFile* file;
+//   Table* table;
+// }
+// 参数中的file_size必须是真实的文件大小，需要用它才能准确读取file末尾的footer
 Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
                              Cache::Handle** handle) {
   Status s;
@@ -46,6 +52,7 @@ Status TableCache::FindTable(uint64_t file_number, uint64_t file_size,
   Slice key(buf, sizeof(buf));
   *handle = cache_->Lookup(key);
   if (*handle == nullptr) {
+    // fname例如"/workspace/leveldb/runtime/file/000077.ldb"
     std::string fname = TableFileName(dbname_, file_number);
     RandomAccessFile* file = nullptr;
     Table* table = nullptr;
@@ -89,7 +96,7 @@ Iterator* TableCache::NewIterator(const ReadOptions& options,
   }
 
   Table* table = reinterpret_cast<TableAndFile*>(cache_->Value(handle))->table;
-  // two level iterator, 支持对sstable的迭代
+  // result的类型为NewTwoLevelIterator, 支持对sstable的迭代
   Iterator* result = table->NewIterator(options);
   result->RegisterCleanup(&UnrefEntry, cache_, handle);
   if (tableptr != nullptr) {

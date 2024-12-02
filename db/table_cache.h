@@ -51,6 +51,7 @@ class TableCache {
   Status FindTable(uint64_t file_number, uint64_t file_size, Cache::Handle**);
 
   Env* const env_;
+  // 由leveldb::DB::Open()方法传入，例如"/workspace/leveldb/runtime/file"
   const std::string dbname_;
   const Options& options_;
   // 复用LRU cache
