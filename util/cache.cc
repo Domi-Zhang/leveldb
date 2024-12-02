@@ -316,7 +316,15 @@ Cache::Handle* LRUCache::Insert(const Slice& key, uint32_t hash, void* value,
 bool LRUCache::FinishErase(LRUHandle* e) {
   if (e != nullptr) {
     assert(e->in_cache);
+    // e在HandleTable里已经调整了next_hash字段了，此处需要调整_lru和_in_use链表。
+    // 此时e可能在_lru也可能在_in_use链表，所以直接使用链表指针来删除节点，而不管是在哪个链表上。
     LRU_Remove(e);
+    // in_cache=false时，Unref不会将e迁移到_lru，这就意味着调用FinishErase方法的场景都不会
+    // 将e放入_lru供后备使用，直接走引用计数到0删除。调用FinishErase方法的场景包括：
+    // 1. Erase主动删除kv；（此时key明确删除不再使用）
+    // 2. Insert中插入已有key替换出的old e；（此时key已经替换为新值，老值没有用）
+    // 3. Insert插入后发现空间不足，清理_lru中的e；（此时e已经在_lru）
+    // 4. Prune清理_lru链表中的e；（此时e已经在_lru）
     e->in_cache = false;
     usage_ -= e->charge;
     Unref(e);
