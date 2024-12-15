@@ -57,6 +57,10 @@ bool SomeFileOverlapsRange(const InternalKeyComparator& icmp,
                            const Slice* smallest_user_key,
                            const Slice* largest_user_key);
 
+// Manifest、VersionEdit、Version、VersionSet之间的关系：
+// Manifest中存储的格式是VersionEdit，读取Manifest文件(例如Recover)后得到的是
+// VersionEdit，它会被Apply到VersionSet::Builder生成一个新的Version加入到VersionSet，
+// 并设置VersionSet::current_为这个最新的Version
 class Version {
  public:
   struct GetStats {
