@@ -334,6 +334,7 @@ void Version::ForEachOverlapping(Slice user_key, Slice internal_key, void* arg,
   if (!tmp.empty()) {
     std::sort(tmp.begin(), tmp.end(), NewestFirst);
     for (uint32_t i = 0; i < tmp.size(); i++) {
+      // func返回值表示是否“不匹配”，那么这个if的意思就是“如果 不是 不匹配 就 跳出”
       if (!(*func)(arg, 0, tmp[i])) {
         return;
       }
@@ -379,6 +380,9 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
     Status s;
     bool found;
 
+    // 判断f中是否有entry与arg->ikey匹配，arg是State*类型，ikey字段是InternalKey
+    // 由DB::Get传入，即输入的查找key。
+    // 返回值表示是否"不匹配"，例如true表示不匹配（需要继续匹配）
     static bool Match(void* arg, int level, FileMetaData* f) {
       State* state = reinterpret_cast<State*>(arg);
 
@@ -392,9 +396,9 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
       state->last_file_read = f;
       state->last_file_read_level = level;
 
-      // 引入了LRU cache来作为打开的sstable的meta缓存
-      // 方便下次查询sstable时使用
-      // 继续到table_cache里面查询
+      // table_cache->Get实际上内部调用的是table->InternalGet，由于table并不能直接使用
+      // ，必须先调用Open读取文件、读取footer并进一步解析meta_index、block_index之类的
+      // 元数据(table->rep的几个字段)，所以加了一层TableCache作为缓缓代理
       state->s = state->vset->table_cache_->Get(*state->options, f->number,
                                                 f->file_size, state->ikey,
                                                 &state->saver, SaveValue);
