@@ -87,6 +87,7 @@ Version::~Version() {
   }
 }
 
+// 查找files集合的最小索引i(即首次出现)，使得key<files[i].largest
 // 适用于L1层以及以上的level，因为key没有overlap，所以可以使用binary search
 // 注意largest实际上是internalKey, 所以这里是internalkey comparator
 // 这个comparator的compare实现，会综合考虑：userkey + sequence
@@ -150,6 +151,7 @@ bool SomeFileOverlapsRange(const InternalKeyComparator& icmp,
     // Find the earliest possible internal key for smallest_user_key
     InternalKey small_key(*smallest_user_key, kMaxSequenceNumber,
                           kValueTypeForSeek);
+    // 查找files中的最小索引i，使得small_key<files[i].largest
     index = FindFile(icmp, files, small_key.Encode());
   }
 
@@ -158,6 +160,10 @@ bool SomeFileOverlapsRange(const InternalKeyComparator& icmp,
     return false;
   }
 
+  // 这里判断largest_user_key是否【不】小于files[index].smallest，如果满足此条件则说明：
+  // 1. files[index].largest > smallest_user_key
+  // 2. files[index].smallest < largest_user_key
+  // 这个条件下两者可能互相为子集、或者部分相交，总之就是有交集的
   return !BeforeFile(ucmp, largest_user_key, files[index]);
 }
 
