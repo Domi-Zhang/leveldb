@@ -266,6 +266,7 @@ Iterator* Version::NewConcatenatingIterator(const ReadOptions& options,
 // l0层每个sstable调用table iter，也就是two level iterator
 // 非l0层直接每层一个NewConcatenatingIterator
 // 思考：why?  key overlap
+// 这个方法和ForEachOverlapping有点像，ForEachOverlapping是给Get点查询方法使用的
 void Version::AddIterators(const ReadOptions& options,
                            std::vector<Iterator*>* iters) {
   // Merge all level zero files together since they may overlap
@@ -395,6 +396,8 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
       if (state->stats->seek_file == nullptr &&
           state->last_file_read != nullptr) {
         // We have had more than one seek for this read.  Charge the 1st file.
+        // 如果发生了1次以上的seek，那么第一次seek的文件肯定是miss的，所以将那个miss的文件
+        // 记录到seek_file中
         state->stats->seek_file = state->last_file_read;
         state->stats->seek_file_level = state->last_file_read_level;
       }

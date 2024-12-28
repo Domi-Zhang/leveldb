@@ -1162,6 +1162,8 @@ Iterator* DBImpl::NewInternalIterator(const ReadOptions& options,
     list.push_back(imm_->NewIterator());
     imm_->Ref();
   }
+  // 将当前版本(versions_->current())的sstable加入到list中，注意l0和ln的加入逻辑不一样，
+  // 因为l0是可能overlap的，而ln不是
   versions_->current()->AddIterators(options, &list);
 
   // 将所有的iter作为child iterator, 构造出merging Iterator
@@ -1215,12 +1217,13 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
     mutex_.Unlock();
     // First look in the memtable, then in the immutable memtable (if any).
     LookupKey lkey(key, snapshot);
+    // mem(MemTable)内部为SkipList，这里的Get方法就是在SkipList中Seek，然后获取Key
     if (mem->Get(lkey, value, &s)) {
       // Done
-      // 1、从memtable中查询，如果hit，直接返回
+      // 1、从memtable中查询，如果hit，直接返回。
     } else if (imm != nullptr && imm->Get(lkey, value, &s)) {
       // Done
-      // 2、从不可变的memtable中尝试查询
+      // 2、从不可变的memtable中尝试查询，imm也是MemTable
     } else {
       // 3、如果内存中查询失败，只能从sstable中查询
       // sstable的查询逻辑被包含在version_set中
@@ -1245,6 +1248,7 @@ Iterator* DBImpl::NewIterator(const ReadOptions& options) {
   SequenceNumber latest_snapshot;
   uint32_t seed;
   // DB全局的iter, memory + sstable
+  // options在后续流程中主要是取两项配置：comparator指针和verify_checksum标志
   Iterator* iter = NewInternalIterator(options, &latest_snapshot, &seed);
   // 基于上面已经有的DB全局的迭代器iter，加上snapshot的处理，得到DBIter
   return NewDBIterator(this, user_comparator(), iter,
