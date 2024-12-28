@@ -548,8 +548,10 @@ int Version::PickLevelForMemTableOutput(const Slice& smallest_user_key,
       }
       if (level + 2 < config::kNumLevels) {
         // Check that file does not overlap too many grandparent bytes.
+        // GetOverlappingInputs获取指定level(level+2)中与start和limit有重合的file，存在overlaps中
         GetOverlappingInputs(level + 2, &start, &limit, &overlaps);
         const int64_t sum = TotalFileSize(overlaps);
+        // MaxGrandParentOverlapBytes就是 10*options->max_file_size
         if (sum > MaxGrandParentOverlapBytes(vset_->options_)) {
           break;
         }
