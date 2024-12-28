@@ -31,7 +31,9 @@ struct FileMetaData {
   InternalKey largest;   // Largest internal key served by table
 };
 
-// 表示某一次操作之后，table整体version的变化
+// VersionEdit 表示一个 Version 到另一个 Version 的变更(增加一些 SST、删除一些 SST)，
+// 为了避免进程崩溃或者机器宕机导致数据丢失，LevelDB 把各个 VersionEdit 都持久化到磁盘，
+// 形成 MANIFEST 文件。数据恢复的过程就是依次应用 VersionEdit 的过程
 class VersionEdit {
  public:
   VersionEdit() { Clear(); }
