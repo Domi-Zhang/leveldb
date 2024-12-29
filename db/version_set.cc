@@ -733,7 +733,7 @@ class VersionSet::Builder {
       // 根据上述注释，差不多意思是：
       // 假设一次seek代价是10ms, 那么读写1MB数据需要cost 10ms
       // 我们按照10倍关系计算level n和level n+1的数据比例关系，那么compact 1M数据差不多需要读写25MB数据
-      // 也就是需要25 * 10ms的磁盘开销，也就是说1次seek能够compact 40KB数据
+      // 也就是需要25 * 10ms的磁盘开销，也就是说1次seek(10ms)能够compact 1M/25(40KB)数据
       // 此时我们等到一个简单的计算：seeks limit = sizeof(sstable) / 40KB
       // 条件放松一些: seek limit = sizeof(sstable) / 16KB
 
@@ -746,25 +746,34 @@ class VersionSet::Builder {
   }
 
   // Save the current state in *v.
+  // 主要是将added_files加入到v中，而deleted_files仅用于判断added_files是否需要加入
+  // 而不会主动去删除
   void SaveTo(Version* v) {
-    BySmallestKey cmp;
+    BySmallestKey cmp{};
     cmp.internal_comparator = &vset_->icmp_;
     for (int level = 0; level < config::kNumLevels; level++) {
       // Merge the set of added files with the set of pre-existing files.
       // Drop any deleted files.  Store the result in *v.
       const std::vector<FileMetaData*>& base_files = base_->files_[level];
-      std::vector<FileMetaData*>::const_iterator base_iter = base_files.begin();
-      std::vector<FileMetaData*>::const_iterator base_end = base_files.end();
+      auto base_iter = base_files.begin();
+      auto base_end = base_files.end();
       const FileSet* added_files = levels_[level].added_files;
       v->files_[level].reserve(base_files.size() + added_files->size());
+      // 交替地将added_files中的文件和base_files中的文件(合并)添加到v中
       for (const auto& added_file : *added_files) {
-        // Add all smaller files listed in base_
-        for (std::vector<FileMetaData*>::const_iterator bpos =
+        // 逐个取出added_file(上面这行代码)
+        // 步骤1： 将base_files中所有小于added_file的file加入到v中(file的比较方法是
+        //        smallest_key)
+        for (auto bpos =
                  std::upper_bound(base_iter, base_end, added_file, cmp);
              base_iter != bpos; ++base_iter) {
+          // 当base_iter==bpos的时候，说明added_file在base中的upper_bound就是
+          // base_iter(upper_bound==bpos==base_iter)，此时base_files中小于
+          // added_file的file都已经被add到中，需要插入added_file了（即下一行代码）
           MaybeAddFile(v, level, *base_iter);
         }
 
+        // 步骤2： 将added_file加入到v中
         MaybeAddFile(v, level, added_file);
       }
 
@@ -1086,6 +1095,7 @@ Status VersionSet::Recover(bool* save_manifest) {
   return s;
 }
 
+// dscname是文件路径(.../MANIFEST-0)，dscbase是文件名(MANIFEST-0)
 bool VersionSet::ReuseManifest(const std::string& dscname,
                                const std::string& dscbase) {
   if (!options_->reuse_logs) {
@@ -1098,6 +1108,7 @@ bool VersionSet::ReuseManifest(const std::string& dscname,
       manifest_type != kDescriptorFile ||
       !env_->GetFileSize(dscname, &manifest_size).ok() ||
       // Make new compacted MANIFEST if old one is too big
+      // TargetFileSize => options->max_file_size
       manifest_size >= TargetFileSize(options_)) {
     return false;
   }

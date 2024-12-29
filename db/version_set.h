@@ -248,6 +248,8 @@ class VersionSet {
 
   // Return the maximum overlapping data (in bytes) at next level for any
   // file at a level >= 1.
+  // 对于level>=1，获取每一层与下一层之间overlap的文件大小总和，注意是每一层计算一次求最大值
+  // ，而不是求所有层的总和
   int64_t MaxNextLevelOverlappingBytes();
 
   // Create an iterator that reads over the compaction inputs for "*c".
