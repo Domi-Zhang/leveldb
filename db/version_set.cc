@@ -1162,6 +1162,8 @@ void VersionSet::Finalize(Version* v) {
   v->compaction_score_ = best_score;
 }
 
+// 将当前version以VersionEdit(包括comparator、compact_point和sst_file_meta[])的格式
+// 写入到log中（VersionEdit -> encode to string -> write log）
 // 产生新的version之后，对version做checkpoint
 // 需要持久化那些东西? compact_pointer | sstfiles meta(每层有哪些文件，每个文件的FileMetaData)
 Status VersionSet::WriteSnapshot(log::Writer* log) {
