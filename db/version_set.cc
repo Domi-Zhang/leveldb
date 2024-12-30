@@ -868,6 +868,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
   std::string new_manifest_file;
   Status s;
 
+  // descriptor在此处就是MANIFEST的意思，descriptor_log_就是当前MANIFEST的Writer
   if (descriptor_log_ == nullptr) {
     // nullptr说明manifest没有被复用， 新开一个mainfest
     // 并且写入db meta snapshot
@@ -879,6 +880,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
     s = env_->NewWritableFile(new_manifest_file, &descriptor_file_);
     if (s.ok()) {
       descriptor_log_ = new log::Writer(descriptor_file_);
+      // 将当前version的信息(comparator、sst_files)序列化为二进制存入descriptor_log_
       s = WriteSnapshot(descriptor_log_);
     }
   }
