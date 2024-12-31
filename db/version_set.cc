@@ -1233,10 +1233,11 @@ const char* VersionSet::LevelSummary(LevelSummaryStorage* scratch) const {
 
 // 返回ikey在v(Version)中的大概位置，这个方法会累加遍历过的每个level中的每个file的file_size
 // 例如ikey是在l2第二个file中发现的，则最后的结果为：
-// sum(l0[...].file_size)
-// + sum(l1[...<ikey].file_size)
-// + sum(l2[0].file_size)
-// + indexOf(l2[1],key)
+//  sum(l0[...].file_size)
+//    + sum(l1[...<ikey].file_size)
+//    + sum(l2[0].file_size)
+//    + indexOf(l2[1],key)
+// 此方法用于实现DB::GetApproximateSizes(start,end)方法导出给用户使用
 uint64_t VersionSet::ApproximateOffsetOf(Version* v, const InternalKey& ikey) {
   uint64_t result = 0;
   for (int level = 0; level < config::kNumLevels; level++) {
