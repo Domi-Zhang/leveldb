@@ -181,13 +181,15 @@ DBImpl::~DBImpl() {
 }
 
 Status DBImpl::NewDB() {
+  const int init_mf_num = 1;
+
   VersionEdit new_db;
   new_db.SetComparatorName(user_comparator()->Name());
   new_db.SetLogNumber(0);
   new_db.SetNextFile(2);
   new_db.SetLastSequence(0);
 
-  const std::string manifest = DescriptorFileName(dbname_, 1);
+  const std::string manifest = DescriptorFileName(dbname_, init_mf_num);
   WritableFile* file;
   Status s = env_->NewWritableFile(manifest, &file);
   if (!s.ok()) {
@@ -208,7 +210,7 @@ Status DBImpl::NewDB() {
   delete file;
   if (s.ok()) {
     // Make "CURRENT" file that points to the new manifest file.
-    s = SetCurrentFile(env_, dbname_, 1);
+    s = SetCurrentFile(env_, dbname_, init_mf_num);
   } else {
     env_->RemoveFile(manifest);
   }
@@ -303,6 +305,8 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   // committed only when the descriptor is created, and this directory
   // may already exist from a previous failed creation attempt.
   env_->CreateDir(dbname_);
+
+  // step1. 对这次recover动作进行加锁，加锁方式是用文件锁锁住"/LOCK"文件
   assert(db_lock_ == nullptr);
   // 注意对文件的访问要持有文件锁，防止并发写入
   Status s = env_->LockFile(LockFileName(dbname_), &db_lock_);
@@ -310,6 +314,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
     return s;
   }
 
+  // step2. 检查"/CURRENT"是否存在，根据options_配置决定是报错还是自动创建
   if (!env_->FileExists(CurrentFileName(dbname_))) {
     if (options_.create_if_missing) {
       Log(options_.info_log, "Creating DB %s since it was missing.",
@@ -329,12 +334,20 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
     }
   }
 
-  // 恢复当前db的状态
+  // step3. 从"/CURRENT"作为入口恢复version
+  //   核心是利用version builder来恢复当前version
+  //   current version = old_version + versionEdit1 + versionEdit2 + ...
   s = versions_->Recover(save_manifest);
   if (!s.ok()) {
     return s;
   }
   SequenceNumber max_sequence(0);
+
+  // step4.
+  //    a)获取目录中的所有文件；
+  //    b)获取versions涉及的所有文件；
+  //    c)ab两步的文件做抵消，如果b中的文件列表不为空，说明a获得的文件列表不全，报错；
+  //    d)在c过程中单独搜集log文件到std::vector<uint64_t> logs中；
 
   // Recover from all newer log files than the ones named in the
   // descriptor (new log files may have been added by the previous
@@ -355,8 +368,8 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   uint64_t number;
   FileType type;
   std::vector<uint64_t> logs;
-  for (size_t i = 0; i < filenames.size(); i++) {
-    if (ParseFileName(filenames[i], &number, &type)) {
+  for (const auto & filename : filenames) {
+    if (ParseFileName(filename, &number, &type)) {
       expected.erase(number);
       // min_log表示当前还没有dump到数据对应的最小的log，这些log需要recover出来
       // prev_log ?
@@ -399,12 +412,11 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
 Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
                               bool* save_manifest, VersionEdit* edit,
                               SequenceNumber* max_sequence) {
-  // 这种inner class的写法，值得细品。。。
   struct LogReporter : public log::Reader::Reporter {
-    Env* env;
-    Logger* info_log;
-    const char* fname;
-    Status* status;  // null if options_.paranoid_checks==false
+    Env* env{};
+    Logger* info_log{};
+    const char* fname{};
+    Status* status{};  // null if options_.paranoid_checks==false
     void Corruption(size_t bytes, const Status& s) override {
       Log(info_log, "%s%s: dropping %d bytes; %s",
           (this->status == nullptr ? "(ignoring error) " : ""), fname,
@@ -444,6 +456,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
   WriteBatch batch;
   int compactions = 0;
   MemTable* mem = nullptr;
+  // status可能会通过LogReporter::Corruption被间接修改
   while (reader.ReadRecord(&record, &scratch) && status.ok()) {
     if (record.size() < 12) {
       reporter.Corruption(record.size(),

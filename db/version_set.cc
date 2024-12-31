@@ -862,6 +862,7 @@ void VersionSet::AppendVersion(Version* v) {
 
 // 增加新的versionedit，表示最新的redo log
 // 这个函数什么时候调用？ 每次compaction完成时
+// 在leveldb里Mutex只有一个，即DBImpl::mutex_
 Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
   if (edit->has_log_number_) {
     assert(edit->log_number_ >= log_number_);
@@ -954,7 +955,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
 
 Status VersionSet::Recover(bool* save_manifest) {
   struct LogReporter : public log::Reader::Reporter {
-    Status* status;
+    Status* status{};
     void Corruption(size_t bytes, const Status& s) override {
       if (this->status->ok()) *this->status = s;
     }
@@ -1066,7 +1067,7 @@ Status VersionSet::Recover(bool* save_manifest) {
   }
 
   if (s.ok()) {
-    Version* v = new Version(this);
+    auto* v = new Version(this);
     // builder里面的version变化值(recover时包含了全量的变化) -> new version
     builder.SaveTo(v);
     // Install recovered version
@@ -1270,15 +1271,15 @@ uint64_t VersionSet::ApproximateOffsetOf(Version* v, const InternalKey& ikey) {
   return result;
 }
 
-// 这里统计当前使用的文件(注意latch)
-// 所以要统计dummy_version里面所有ref的文件，保证正在使用的sst file不会被回收
+// 这里统计当前使用的sst文件(注意latch)，保证正在使用的sst file不会被回收
+// all(file foreach v->files_[level] foreach level foreach versions)
 void VersionSet::AddLiveFiles(std::set<uint64_t>* live) {
   for (Version* v = dummy_versions_.next_; v != &dummy_versions_;
        v = v->next_) {
     for (int level = 0; level < config::kNumLevels; level++) {
       const std::vector<FileMetaData*>& files = v->files_[level];
-      for (size_t i = 0; i < files.size(); i++) {
-        live->insert(files[i]->number);
+      for (auto file : files) {
+        live->insert(file->number);
       }
     }
   }

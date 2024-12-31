@@ -90,6 +90,7 @@ void MemTable::Add(SequenceNumber s, ValueType type, const Slice& key,
   const size_t encoded_len = VarintLength(internal_key_size) +
                              internal_key_size + VarintLength(val_size) +
                              val_size;
+  // todo 跟踪buf变化情况
   char* buf = arena_.Allocate(encoded_len);
   char* p = EncodeVarint32(buf, internal_key_size); // internal key size
   std::memcpy(p, key.data(), key_size);

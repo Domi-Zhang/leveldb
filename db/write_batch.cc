@@ -39,12 +39,12 @@ void WriteBatch::Clear() {
 
 size_t WriteBatch::ApproximateSize() const { return rep_.size(); }
 
-// 拼接成一条完整的record(checksum + length + type(FULL ...) + data)之后，开始对
-// 其中的data进行解析
-// data = (sequence number(8B) + entry count(4B) + entry1 + entry2 + ...)
+// 从rep_中不断读取entry后调用handler::Put/Delete (这两个方法内部都是调用MemTable::Add)
+// rep_ = (sequence number(8B) + entry count(4B) + entry1 + entry2 + ...)
+// entry = type(1B) + Varint(key内容长度) + key内容
+//          当type=kv时再(+ Varint(value内容长度) + value内容)
 Status WriteBatch::Iterate(Handler* handler) const {
   Slice input(rep_);
-  // 
   if (input.size() < kHeader) {
     return Status::Corruption("malformed WriteBatch (too small)");
   }
@@ -119,8 +119,8 @@ void WriteBatch::Append(const WriteBatch& source) {
 namespace {
 class MemTableInserter : public WriteBatch::Handler {
  public:
-  SequenceNumber sequence_;
-  MemTable* mem_;
+  SequenceNumber sequence_{};
+  MemTable* mem_{};
 
   void Put(const Slice& key, const Slice& value) override {
     mem_->Add(sequence_, kTypeValue, key, value);
