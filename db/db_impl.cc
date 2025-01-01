@@ -226,7 +226,9 @@ void DBImpl::MaybeIgnoreError(Status* s) const {
   }
 }
 
-// compaction结束之后，需要判断当前db哪些文件可以回收
+// compaction结束之后，需要删除废弃文件，例如
+//  小于当前log number的log文件
+//  小于当前manifest number的manifest文件
 void DBImpl::RemoveObsoleteFiles() {
   // 注意latch(是否全局一个mutex，太重了？比如这里跟读写之间会争抢这把锁，但是这些逻辑的确都是互斥的)
   mutex_.AssertHeld();
@@ -1619,6 +1621,18 @@ Status DB::Delete(const WriteOptions& opt, const Slice& key) {
 
 DB::~DB() = default;
 
+// 整个open过程简单来说就是：
+// 1.添加文件锁/LOCK
+// 2.读取CURRENT指向的MANIFEST-XXX文件，MANIFEST文件中的每一条record都是一个VersionEdit
+// 3.构建一个VersionSet::Builder不断apply上一步读取的VersionEdit，最终构建出VersionSet
+//  ，此时VersionSet就获得了sst file中最大的log number（在MemTable生成VersionEdit的时
+//  候写入的）
+// 4.读取db目录下的所有log文件，如果log number大于VersionSet::log_number，则将其读入一个
+//  临时MemTable，读取的过程中MemTable可能会超过限制大小，生成L0 sst file。如果是最后一个
+//  log file且开启了log复用则会把刚刚的MemTable设置为DBImpl::mem_，否则会把这个MemTable
+//  也生成sst file，并新建一个MemTable设置给DBImpl::mem_
+// Tips: 还记得查询流程吗？ 1. DBImpl是查询入口，先查mem_(MemTable)，然后查
+//  versions_(VersionSet)，versions_会对其中的sst file（上面第3步加入）逐个进行find
 Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   *dbptr = nullptr;
 

@@ -860,7 +860,7 @@ void VersionSet::AppendVersion(Version* v) {
   v->next_->prev_ = v;
 }
 
-// 增加新的versionedit，表示最新的redo log
+// 增加新的VersionEdit，表示最新的redo log
 // 这个函数什么时候调用？ 每次compaction完成时
 // 在leveldb里Mutex只有一个，即DBImpl::mutex_
 Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
