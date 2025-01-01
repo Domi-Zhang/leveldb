@@ -388,6 +388,11 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   // 尝试从redo log中恢复内存状态
   std::sort(logs.begin(), logs.end());
   for (size_t i = 0; i < logs.size(); i++) {
+    // RecoverLogFile的流程：
+    // 1. 从log_file(格式seq_num+count+entry[...])读取每一个entry写入临时MemTable
+    // 2. 将MemTable compact为L0 sst file
+    // 3. 如果当前是最后一个log，尝试复用这个log_file，此时临时MemTable可能不会compact，
+    //  而是直接被设置到DBImpl::mem_继续使用
     s = RecoverLogFile(logs[i], (i == logs.size() - 1), save_manifest, edit,
                        &max_sequence);
     if (!s.ok()) {
@@ -519,7 +524,11 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
   }
 
   if (mem != nullptr) {
-    // mem did not get reused; compact it.
+    // 到这里说明：
+    // 1.log_file没有被复用；
+    // 2.上面创建的临时MemTable没有满足compact大小条件，没有被compact为 L0 sst file
+    // 所以log_file读取的结果实际不是MemTable，而是L0 sst file，上面读取到MemTable只是
+    // 为了方便生成L0 sst file，当然如果开启了log file复用除外
     if (status.ok()) {
       *save_manifest = true;
       status = WriteLevel0Table(mem, edit, nullptr);
