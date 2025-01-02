@@ -1679,6 +1679,7 @@ Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   impl->mutex_.Unlock();
   if (s.ok()) {
     assert(impl->mem_ != nullptr);
+    // 返回DBImpl
     *dbptr = impl;
   } else {
     delete impl;
