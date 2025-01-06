@@ -130,10 +130,12 @@ bool ParseFileName(const std::string& filename, uint64_t* number,
 
 Status SetCurrentFile(Env* env, const std::string& dbname,
                       uint64_t descriptor_number) {
+  // dbname就是当前db文件存储的绝对路径
   // Remove leading "dbname/" and add newline to manifest file name
   std::string manifest = DescriptorFileName(dbname, descriptor_number);
   Slice contents = manifest;
   assert(contents.starts_with(dbname + "/"));
+  // 得到 MANIFEST-XXX
   contents.remove_prefix(dbname.size() + 1);
   // rename保证原子性(delete & create)
   std::string tmp = TempFileName(dbname, descriptor_number);

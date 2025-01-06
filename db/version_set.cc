@@ -87,6 +87,7 @@ Version::~Version() {
   }
 }
 
+// 查找files集合的最小索引i(即首次出现)，使得key<files[i].largest
 // 适用于L1层以及以上的level，因为key没有overlap，所以可以使用binary search
 // 注意largest实际上是internalKey, 所以这里是internalkey comparator
 // 这个comparator的compare实现，会综合考虑：userkey + sequence
@@ -150,6 +151,7 @@ bool SomeFileOverlapsRange(const InternalKeyComparator& icmp,
     // Find the earliest possible internal key for smallest_user_key
     InternalKey small_key(*smallest_user_key, kMaxSequenceNumber,
                           kValueTypeForSeek);
+    // 查找files中的最小索引i，使得small_key<files[i].largest
     index = FindFile(icmp, files, small_key.Encode());
   }
 
@@ -158,6 +160,10 @@ bool SomeFileOverlapsRange(const InternalKeyComparator& icmp,
     return false;
   }
 
+  // 这里判断largest_user_key是否【不】小于files[index].smallest，如果满足此条件则说明：
+  // 1. files[index].largest > smallest_user_key
+  // 2. files[index].smallest < largest_user_key
+  // 这个条件下两者可能互相为子集、或者部分相交，总之就是有交集的
   return !BeforeFile(ucmp, largest_user_key, files[index]);
 }
 
@@ -260,6 +266,7 @@ Iterator* Version::NewConcatenatingIterator(const ReadOptions& options,
 // l0层每个sstable调用table iter，也就是two level iterator
 // 非l0层直接每层一个NewConcatenatingIterator
 // 思考：why?  key overlap
+// 这个方法和ForEachOverlapping有点像，ForEachOverlapping是给Get点查询方法使用的
 void Version::AddIterators(const ReadOptions& options,
                            std::vector<Iterator*>* iters) {
   // Merge all level zero files together since they may overlap
@@ -334,6 +341,7 @@ void Version::ForEachOverlapping(Slice user_key, Slice internal_key, void* arg,
   if (!tmp.empty()) {
     std::sort(tmp.begin(), tmp.end(), NewestFirst);
     for (uint32_t i = 0; i < tmp.size(); i++) {
+      // func返回值表示是否“不匹配”，那么这个if的意思就是“如果 不是 不匹配 就 跳出”
       if (!(*func)(arg, 0, tmp[i])) {
         return;
       }
@@ -379,12 +387,17 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
     Status s;
     bool found;
 
+    // 判断f中是否有entry与arg->ikey匹配，arg是State*类型，ikey字段是InternalKey
+    // 由DB::Get传入，即输入的查找key。
+    // 返回值表示是否"不匹配"，例如true表示不匹配（需要继续匹配）
     static bool Match(void* arg, int level, FileMetaData* f) {
       State* state = reinterpret_cast<State*>(arg);
 
       if (state->stats->seek_file == nullptr &&
           state->last_file_read != nullptr) {
         // We have had more than one seek for this read.  Charge the 1st file.
+        // 如果发生了1次以上的seek，那么第一次seek的文件肯定是miss的，所以将那个miss的文件
+        // 记录到seek_file中
         state->stats->seek_file = state->last_file_read;
         state->stats->seek_file_level = state->last_file_read_level;
       }
@@ -392,9 +405,9 @@ Status Version::Get(const ReadOptions& options, const LookupKey& k,
       state->last_file_read = f;
       state->last_file_read_level = level;
 
-      // 引入了LRU cache来作为打开的sstable的meta缓存
-      // 方便下次查询sstable时使用
-      // 继续到table_cache里面查询
+      // table_cache->Get实际上内部调用的是table->InternalGet，由于table并不能直接使用
+      // ，必须先调用Open读取文件、读取footer并进一步解析meta_index、block_index之类的
+      // 元数据(table->rep的几个字段)，所以加了一层TableCache作为缓缓代理
       state->s = state->vset->table_cache_->Get(*state->options, f->number,
                                                 f->file_size, state->ikey,
                                                 &state->saver, SaveValue);
@@ -535,8 +548,10 @@ int Version::PickLevelForMemTableOutput(const Slice& smallest_user_key,
       }
       if (level + 2 < config::kNumLevels) {
         // Check that file does not overlap too many grandparent bytes.
+        // GetOverlappingInputs获取指定level(level+2)中与start和limit有重合的file，存在overlaps中
         GetOverlappingInputs(level + 2, &start, &limit, &overlaps);
         const int64_t sum = TotalFileSize(overlaps);
+        // MaxGrandParentOverlapBytes就是 10*options->max_file_size
         if (sum > MaxGrandParentOverlapBytes(vset_->options_)) {
           break;
         }
@@ -718,7 +733,7 @@ class VersionSet::Builder {
       // 根据上述注释，差不多意思是：
       // 假设一次seek代价是10ms, 那么读写1MB数据需要cost 10ms
       // 我们按照10倍关系计算level n和level n+1的数据比例关系，那么compact 1M数据差不多需要读写25MB数据
-      // 也就是需要25 * 10ms的磁盘开销，也就是说1次seek能够compact 40KB数据
+      // 也就是需要25 * 10ms的磁盘开销，也就是说1次seek(10ms)能够compact 1M/25(40KB)数据
       // 此时我们等到一个简单的计算：seeks limit = sizeof(sstable) / 40KB
       // 条件放松一些: seek limit = sizeof(sstable) / 16KB
 
@@ -731,25 +746,34 @@ class VersionSet::Builder {
   }
 
   // Save the current state in *v.
+  // 主要是将added_files加入到v中，而deleted_files仅用于判断added_files是否需要加入
+  // 而不会主动去删除
   void SaveTo(Version* v) {
-    BySmallestKey cmp;
+    BySmallestKey cmp{};
     cmp.internal_comparator = &vset_->icmp_;
     for (int level = 0; level < config::kNumLevels; level++) {
       // Merge the set of added files with the set of pre-existing files.
       // Drop any deleted files.  Store the result in *v.
       const std::vector<FileMetaData*>& base_files = base_->files_[level];
-      std::vector<FileMetaData*>::const_iterator base_iter = base_files.begin();
-      std::vector<FileMetaData*>::const_iterator base_end = base_files.end();
+      auto base_iter = base_files.begin();
+      auto base_end = base_files.end();
       const FileSet* added_files = levels_[level].added_files;
       v->files_[level].reserve(base_files.size() + added_files->size());
+      // 交替地将added_files中的文件和base_files中的文件(合并)添加到v中
       for (const auto& added_file : *added_files) {
-        // Add all smaller files listed in base_
-        for (std::vector<FileMetaData*>::const_iterator bpos =
+        // 逐个取出added_file(上面这行代码)
+        // 步骤1： 将base_files中所有小于added_file的file加入到v中(file的比较方法是
+        //        smallest_key)
+        for (auto bpos =
                  std::upper_bound(base_iter, base_end, added_file, cmp);
              base_iter != bpos; ++base_iter) {
+          // 当base_iter==bpos的时候，说明added_file在base中的upper_bound就是
+          // base_iter(upper_bound==bpos==base_iter)，此时base_files中小于
+          // added_file的file都已经被add到中，需要插入added_file了（即下一行代码）
           MaybeAddFile(v, level, *base_iter);
         }
 
+        // 步骤2： 将added_file加入到v中
         MaybeAddFile(v, level, added_file);
       }
 
@@ -836,8 +860,9 @@ void VersionSet::AppendVersion(Version* v) {
   v->next_->prev_ = v;
 }
 
-// 增加新的versionedit，表示最新的redo log
+// 增加新的VersionEdit，表示最新的redo log
 // 这个函数什么时候调用？ 每次compaction完成时
+// 在leveldb里Mutex只有一个，即DBImpl::mutex_
 Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
   if (edit->has_log_number_) {
     assert(edit->log_number_ >= log_number_);
@@ -932,7 +957,7 @@ Status VersionSet::LogAndApply(VersionEdit* edit, port::Mutex* mu) {
 
 Status VersionSet::Recover(bool* save_manifest) {
   struct LogReporter : public log::Reader::Reporter {
-    Status* status;
+    Status* status{};
     void Corruption(size_t bytes, const Status& s) override {
       if (this->status->ok()) *this->status = s;
     }
@@ -1044,7 +1069,7 @@ Status VersionSet::Recover(bool* save_manifest) {
   }
 
   if (s.ok()) {
-    Version* v = new Version(this);
+    auto* v = new Version(this);
     // builder里面的version变化值(recover时包含了全量的变化) -> new version
     builder.SaveTo(v);
     // Install recovered version
@@ -1073,6 +1098,7 @@ Status VersionSet::Recover(bool* save_manifest) {
   return s;
 }
 
+// dscname是文件路径(.../MANIFEST-0)，dscbase是文件名(MANIFEST-0)
 bool VersionSet::ReuseManifest(const std::string& dscname,
                                const std::string& dscbase) {
   if (!options_->reuse_logs) {
@@ -1085,6 +1111,7 @@ bool VersionSet::ReuseManifest(const std::string& dscname,
       manifest_type != kDescriptorFile ||
       !env_->GetFileSize(dscname, &manifest_size).ok() ||
       // Make new compacted MANIFEST if old one is too big
+      // TargetFileSize => options->max_file_size
       manifest_size >= TargetFileSize(options_)) {
     return false;
   }
@@ -1154,6 +1181,8 @@ void VersionSet::Finalize(Version* v) {
   v->compaction_score_ = best_score;
 }
 
+// 将当前version以VersionEdit(包括comparator、compact_point和sst_file_meta[])的格式
+// 写入到log中（VersionEdit -> encode to string -> write log）
 // 产生新的version之后，对version做checkpoint
 // 需要持久化那些东西? compact_pointer | sstfiles meta(每层有哪些文件，每个文件的FileMetaData)
 Status VersionSet::WriteSnapshot(log::Writer* log) {
@@ -1205,6 +1234,13 @@ const char* VersionSet::LevelSummary(LevelSummaryStorage* scratch) const {
   return scratch->buffer;
 }
 
+// 返回ikey在v(Version)中的大概位置，这个方法会累加遍历过的每个level中的每个file的file_size
+// 例如ikey是在l2第二个file中发现的，则最后的结果为：
+//  sum(l0[...].file_size)
+//    + sum(l1[...<ikey].file_size)
+//    + sum(l2[0].file_size)
+//    + indexOf(l2[1],key)
+// 此方法用于实现DB::GetApproximateSizes(start,end)方法导出给用户使用
 uint64_t VersionSet::ApproximateOffsetOf(Version* v, const InternalKey& ikey) {
   uint64_t result = 0;
   for (int level = 0; level < config::kNumLevels; level++) {
@@ -1237,15 +1273,15 @@ uint64_t VersionSet::ApproximateOffsetOf(Version* v, const InternalKey& ikey) {
   return result;
 }
 
-// 这里统计当前使用的文件(注意latch)
-// 所以要统计dummy_version里面所有ref的文件，保证正在使用的sst file不会被回收
+// 这里统计当前使用的sst文件(注意latch)，保证正在使用的sst file不会被回收
+// all(file foreach v->files_[level] foreach level foreach versions)
 void VersionSet::AddLiveFiles(std::set<uint64_t>* live) {
   for (Version* v = dummy_versions_.next_; v != &dummy_versions_;
        v = v->next_) {
     for (int level = 0; level < config::kNumLevels; level++) {
       const std::vector<FileMetaData*>& files = v->files_[level];
-      for (size_t i = 0; i < files.size(); i++) {
-        live->insert(files[i]->number);
+      for (auto file : files) {
+        live->insert(file->number);
       }
     }
   }

@@ -33,10 +33,21 @@ struct Table::Rep {
 
   BlockHandle metaindex_handle;  // Handle to metaindex_block: saved from footer
   // index block就是普通的block格式
+  // index block的Seek方法先找到第一个>=target的key，而这个key对应的value是一个BlockHandle
+  // ，它指向的是小于这个key的最大一批kv。
+  // 这里的key是FindShortSuccessor获得的大于last_key的第一个虚拟key，最终达到的效果就相当于
+  // 实现了一个范围查找算法
   Block* index_block;
 };
 
-// open table主要是把meta(包括Index block & meta index block)数据读到cache
+// Open Table的流程：
+// file
+//    |-> 1.读取footer，获得index_handle和metaindex_handle
+//        |-> 2.通过index_handle读取index block，存入table->rep->index_block
+//        |-> 3.通过metaindex_handle读取meta index block
+//        |-> 4.通过meta index block寻找key为"filter.{filter-policy}"的offset和limit
+//        |-> 5.将上一步的offset和limit读取为FilterBlockReader(KeyMayMatch函数就是它提供的)
+// 其中3、4、5都是ReadMeta函数实现的
 Status Table::Open(const Options& options, RandomAccessFile* file,
                    uint64_t size, Table** table) {
   *table = nullptr;
@@ -54,8 +65,6 @@ Status Table::Open(const Options& options, RandomAccessFile* file,
   s = footer.DecodeFrom(&footer_input);
   if (!s.ok()) return s;
 
-  // Read the index block
-  // Open Table的核心是读出sstable中的meta部分，缓存起来，其实就是file指针和index_block, metaindex_handle
   BlockContents index_block_contents;
   ReadOptions opt;
   if (options.paranoid_checks) {
@@ -87,8 +96,7 @@ void Table::ReadMeta(const Footer& footer) {
     return;  // Do not need any metadata
   }
 
-  // TODO(sanjay): Skip this if footer.metaindex_handle() size indicates
-  // it is an empty block.
+  // TODO(sanjay): Skip this if footer.metaindex_handle() size indicates it is an empty block.
   ReadOptions opt;
   if (rep_->options.paranoid_checks) {
     opt.verify_checksums = true;
@@ -105,6 +113,7 @@ void Table::ReadMeta(const Footer& footer) {
   key.append(rep_->options.filter_policy->Name());
   iter->Seek(key);
   if (iter->Valid() && iter->key() == Slice(key)) {
+    // iter->value()的值是Filter的offset和limit，需要在ReadFilter中再次路由
     ReadFilter(iter->value());
   }
   delete iter;
@@ -125,6 +134,7 @@ void Table::ReadFilter(const Slice& filter_handle_value) {
     opt.verify_checksums = true;
   }
   BlockContents block;
+  // 将Filter的内容读入到block变量中
   if (!ReadBlock(rep_->file, opt, filter_handle, &block).ok()) {
     return;
   }
@@ -172,6 +182,7 @@ Iterator* Table::BlockReader(void* arg, const ReadOptions& options,
     if (block_cache != nullptr) {
       char cache_key_buffer[16];
       // block cache key: table_id + block_offset
+      // cache_id在Table::Open时生成的唯一id
       EncodeFixed64(cache_key_buffer, table->rep_->cache_id);
       EncodeFixed64(cache_key_buffer + 8, handle.offset());
       Slice key(cache_key_buffer, sizeof(cache_key_buffer));
@@ -182,8 +193,16 @@ Iterator* Table::BlockReader(void* arg, const ReadOptions& options,
         block = reinterpret_cast<Block*>(block_cache->Value(cache_handle));
       } else {
         // 否则从sstable文件中读出block，并且加入到block cache
+        // 读取的结果写入contents变量，结构如下
+        // struct BlockContents {
+        //  Slice data;
+        //  bool cachable;
+        //  bool heap_allocated;
+        // }
         s = ReadBlock(table->rep_->file, options, handle, &contents);
         if (s.ok()) {
+          // Block基于contents读取restart_points，加上配套的Block::Iter相关函数，可以
+          // 快速的读取相应block
           block = new Block(contents);
           if (contents.cachable && options.fill_cache) {
             cache_handle = block_cache->Insert(key, block, block->size(),
@@ -203,6 +222,7 @@ Iterator* Table::BlockReader(void* arg, const ReadOptions& options,
   Iterator* iter;
   if (block != nullptr) {
     iter = block->NewIterator(table->rep_->options.comparator);
+    // 注册在iter析构时调用的钩子函数
     if (cache_handle == nullptr) {
       iter->RegisterCleanup(&DeleteBlock, block, nullptr);
     } else {
@@ -217,6 +237,7 @@ Iterator* Table::BlockReader(void* arg, const ReadOptions& options,
 // l0层的sstable file的迭代器
 Iterator* Table::NewIterator(const ReadOptions& options) const {
   return NewTwoLevelIterator(
+      // rep_->index_block是在Open方法中构建的，是一个Block
       rep_->index_block->NewIterator(rep_->options.comparator),
       &Table::BlockReader, const_cast<Table*>(this), options);
 }
@@ -280,6 +301,8 @@ uint64_t Table::ApproximateOffsetOf(const Slice& key) const {
     // right near the end of the file).
     result = rep_->metaindex_handle.offset();
   }
+  // 解析失败或key大于block中的所有key，返回末尾offset，但rep_中又没有记录末尾的offset，
+  // 包括index_block_handle和footer都没有，最靠近末尾的就是metaindex_handle
   delete index_iter;
   return result;
 }

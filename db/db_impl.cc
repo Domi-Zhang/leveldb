@@ -181,13 +181,15 @@ DBImpl::~DBImpl() {
 }
 
 Status DBImpl::NewDB() {
+  const int init_mf_num = 1;
+
   VersionEdit new_db;
   new_db.SetComparatorName(user_comparator()->Name());
   new_db.SetLogNumber(0);
   new_db.SetNextFile(2);
   new_db.SetLastSequence(0);
 
-  const std::string manifest = DescriptorFileName(dbname_, 1);
+  const std::string manifest = DescriptorFileName(dbname_, init_mf_num);
   WritableFile* file;
   Status s = env_->NewWritableFile(manifest, &file);
   if (!s.ok()) {
@@ -208,7 +210,7 @@ Status DBImpl::NewDB() {
   delete file;
   if (s.ok()) {
     // Make "CURRENT" file that points to the new manifest file.
-    s = SetCurrentFile(env_, dbname_, 1);
+    s = SetCurrentFile(env_, dbname_, init_mf_num);
   } else {
     env_->RemoveFile(manifest);
   }
@@ -224,7 +226,9 @@ void DBImpl::MaybeIgnoreError(Status* s) const {
   }
 }
 
-// compaction结束之后，需要判断当前db哪些文件可以回收
+// compaction结束之后，需要删除废弃文件，例如
+//  小于当前log number的log文件
+//  小于当前manifest number的manifest文件
 void DBImpl::RemoveObsoleteFiles() {
   // 注意latch(是否全局一个mutex，太重了？比如这里跟读写之间会争抢这把锁，但是这些逻辑的确都是互斥的)
   mutex_.AssertHeld();
@@ -303,6 +307,8 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   // committed only when the descriptor is created, and this directory
   // may already exist from a previous failed creation attempt.
   env_->CreateDir(dbname_);
+
+  // step1. 对这次recover动作进行加锁，加锁方式是用文件锁锁住"/LOCK"文件
   assert(db_lock_ == nullptr);
   // 注意对文件的访问要持有文件锁，防止并发写入
   Status s = env_->LockFile(LockFileName(dbname_), &db_lock_);
@@ -310,6 +316,7 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
     return s;
   }
 
+  // step2. 检查"/CURRENT"是否存在，根据options_配置决定是报错还是自动创建
   if (!env_->FileExists(CurrentFileName(dbname_))) {
     if (options_.create_if_missing) {
       Log(options_.info_log, "Creating DB %s since it was missing.",
@@ -329,12 +336,20 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
     }
   }
 
-  // 恢复当前db的状态
+  // step3. 从"/CURRENT"作为入口恢复version
+  //   核心是利用version builder来恢复当前version
+  //   current version = old_version + versionEdit1 + versionEdit2 + ...
   s = versions_->Recover(save_manifest);
   if (!s.ok()) {
     return s;
   }
   SequenceNumber max_sequence(0);
+
+  // step4.
+  //    a)获取目录中的所有文件；
+  //    b)获取versions涉及的所有文件；
+  //    c)ab两步的文件做抵消，如果b中的文件列表不为空，说明a获得的文件列表不全，报错；
+  //    d)在c过程中单独搜集log文件到std::vector<uint64_t> logs中；
 
   // Recover from all newer log files than the ones named in the
   // descriptor (new log files may have been added by the previous
@@ -355,8 +370,8 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   uint64_t number;
   FileType type;
   std::vector<uint64_t> logs;
-  for (size_t i = 0; i < filenames.size(); i++) {
-    if (ParseFileName(filenames[i], &number, &type)) {
+  for (const auto & filename : filenames) {
+    if (ParseFileName(filename, &number, &type)) {
       expected.erase(number);
       // min_log表示当前还没有dump到数据对应的最小的log，这些log需要recover出来
       // prev_log ?
@@ -375,6 +390,11 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
   // 尝试从redo log中恢复内存状态
   std::sort(logs.begin(), logs.end());
   for (size_t i = 0; i < logs.size(); i++) {
+    // RecoverLogFile的流程：
+    // 1. 从log_file(格式seq_num+count+entry[...])读取每一个entry写入临时MemTable
+    // 2. 将MemTable compact为L0 sst file
+    // 3. 如果当前是最后一个log，尝试复用这个log_file，此时临时MemTable可能不会compact，
+    //  而是直接被设置到DBImpl::mem_继续使用
     s = RecoverLogFile(logs[i], (i == logs.size() - 1), save_manifest, edit,
                        &max_sequence);
     if (!s.ok()) {
@@ -399,12 +419,11 @@ Status DBImpl::Recover(VersionEdit* edit, bool* save_manifest) {
 Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
                               bool* save_manifest, VersionEdit* edit,
                               SequenceNumber* max_sequence) {
-  // 这种inner class的写法，值得细品。。。
   struct LogReporter : public log::Reader::Reporter {
-    Env* env;
-    Logger* info_log;
-    const char* fname;
-    Status* status;  // null if options_.paranoid_checks==false
+    Env* env{};
+    Logger* info_log{};
+    const char* fname{};
+    Status* status{};  // null if options_.paranoid_checks==false
     void Corruption(size_t bytes, const Status& s) override {
       Log(info_log, "%s%s: dropping %d bytes; %s",
           (this->status == nullptr ? "(ignoring error) " : ""), fname,
@@ -444,6 +463,7 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
   WriteBatch batch;
   int compactions = 0;
   MemTable* mem = nullptr;
+  // status可能会通过LogReporter::Corruption被间接修改
   while (reader.ReadRecord(&record, &scratch) && status.ok()) {
     if (record.size() < 12) {
       reporter.Corruption(record.size(),
@@ -506,7 +526,11 @@ Status DBImpl::RecoverLogFile(uint64_t log_number, bool last_log,
   }
 
   if (mem != nullptr) {
-    // mem did not get reused; compact it.
+    // 到这里说明：
+    // 1.log_file没有被复用；
+    // 2.上面创建的临时MemTable没有满足compact大小条件，没有被compact为 L0 sst file
+    // 所以log_file读取的结果实际不是MemTable，而是L0 sst file，上面读取到MemTable只是
+    // 为了方便生成L0 sst file，当然如果开启了log file复用除外
     if (status.ok()) {
       *save_manifest = true;
       status = WriteLevel0Table(mem, edit, nullptr);
@@ -1162,6 +1186,8 @@ Iterator* DBImpl::NewInternalIterator(const ReadOptions& options,
     list.push_back(imm_->NewIterator());
     imm_->Ref();
   }
+  // 将当前版本(versions_->current())的sstable加入到list中，注意l0和ln的加入逻辑不一样，
+  // 因为l0是可能overlap的，而ln不是
   versions_->current()->AddIterators(options, &list);
 
   // 将所有的iter作为child iterator, 构造出merging Iterator
@@ -1215,12 +1241,13 @@ Status DBImpl::Get(const ReadOptions& options, const Slice& key,
     mutex_.Unlock();
     // First look in the memtable, then in the immutable memtable (if any).
     LookupKey lkey(key, snapshot);
+    // mem(MemTable)内部为SkipList，这里的Get方法就是在SkipList中Seek，然后获取Key
     if (mem->Get(lkey, value, &s)) {
       // Done
-      // 1、从memtable中查询，如果hit，直接返回
+      // 1、从memtable中查询，如果hit，直接返回。
     } else if (imm != nullptr && imm->Get(lkey, value, &s)) {
       // Done
-      // 2、从不可变的memtable中尝试查询
+      // 2、从不可变的memtable中尝试查询，imm也是MemTable
     } else {
       // 3、如果内存中查询失败，只能从sstable中查询
       // sstable的查询逻辑被包含在version_set中
@@ -1245,6 +1272,7 @@ Iterator* DBImpl::NewIterator(const ReadOptions& options) {
   SequenceNumber latest_snapshot;
   uint32_t seed;
   // DB全局的iter, memory + sstable
+  // options在后续流程中主要是取两项配置：comparator指针和verify_checksum标志
   Iterator* iter = NewInternalIterator(options, &latest_snapshot, &seed);
   // 基于上面已经有的DB全局的迭代器iter，加上snapshot的处理，得到DBIter
   return NewDBIterator(this, user_comparator(), iter,
@@ -1593,10 +1621,22 @@ Status DB::Delete(const WriteOptions& opt, const Slice& key) {
 
 DB::~DB() = default;
 
+// 整个open过程简单来说就是：
+// 1.添加文件锁/LOCK
+// 2.读取CURRENT指向的MANIFEST-XXX文件，MANIFEST文件中的每一条record都是一个VersionEdit
+// 3.构建一个VersionSet::Builder不断apply上一步读取的VersionEdit，最终构建出VersionSet
+//  ，此时VersionSet就获得了sst file中最大的log number（在MemTable生成VersionEdit的时
+//  候写入的）
+// 4.读取db目录下的所有log文件，如果log number大于VersionSet::log_number，则将其读入一个
+//  临时MemTable，读取的过程中MemTable可能会超过限制大小，生成L0 sst file。如果是最后一个
+//  log file且开启了log复用则会把刚刚的MemTable设置为DBImpl::mem_，否则会把这个MemTable
+//  也生成sst file，并新建一个MemTable设置给DBImpl::mem_
+// Tips: 还记得查询流程吗？ 1. DBImpl是查询入口，先查mem_(MemTable)，然后查
+//  versions_(VersionSet)，versions_会对其中的sst file（上面第3步加入）逐个进行find
 Status DB::Open(const Options& options, const std::string& dbname, DB** dbptr) {
   *dbptr = nullptr;
 
-  DBImpl* impl = new DBImpl(options, dbname);
+  auto* impl = new DBImpl(options, dbname);
   impl->mutex_.Lock();
   VersionEdit edit;
   // Recover handles create_if_missing, error_if_exists

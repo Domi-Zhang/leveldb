@@ -59,7 +59,7 @@ void PutVarint32(std::string* dst, uint32_t v) {
 
 char* EncodeVarint64(char* dst, uint64_t v) {
   static const int B = 128;
-  uint8_t* ptr = reinterpret_cast<uint8_t*>(dst);
+  auto* ptr = reinterpret_cast<uint8_t*>(dst);
   while (v >= B) {
     *(ptr++) = v | B;
     v >>= 7;
@@ -147,6 +147,8 @@ bool GetVarint64(Slice* input, uint64_t* value) {
   }
 }
 
+// 从input中读取可变长度的内容到result里，这里假定input里的记录格式为"Varint(内容长度)+内容"，
+// 读取后input会将当前记录给截断掉，指向后面的内容
 bool GetLengthPrefixedSlice(Slice* input, Slice* result) {
   uint32_t len;
   if (GetVarint32(input, &len) && input->size() >= len) {

@@ -668,11 +668,13 @@ class PosixEnv : public Env {
       return PosixError(filename, errno);
     }
 
+    // 使用locks_在进程内加文件锁
     if (!locks_.Insert(filename)) {
       ::close(fd);
       return Status::IOError("lock " + filename, "already held by process");
     }
 
+    // 然后使用fcntl在进程间加文件锁
     if (LockOrUnlock(fd, true) == -1) {
       int lock_errno = errno;
       ::close(fd);

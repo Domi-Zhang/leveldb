@@ -57,6 +57,10 @@ bool SomeFileOverlapsRange(const InternalKeyComparator& icmp,
                            const Slice* smallest_user_key,
                            const Slice* largest_user_key);
 
+// Manifest、VersionEdit、Version、VersionSet之间的关系：
+// Manifest中存储的格式是VersionEdit，读取Manifest文件(例如Recover)后得到的是
+// VersionEdit，它会被Apply到VersionSet::Builder生成一个新的Version加入到VersionSet，
+// 并设置VersionSet::current_为这个最新的Version
 class Version {
  public:
   struct GetStats {
@@ -244,6 +248,8 @@ class VersionSet {
 
   // Return the maximum overlapping data (in bytes) at next level for any
   // file at a level >= 1.
+  // 对于level>=1，获取每一层与下一层之间overlap的文件大小总和，注意是每一层计算一次求最大值
+  // ，而不是求所有层的总和
   int64_t MaxNextLevelOverlappingBytes();
 
   // Create an iterator that reads over the compaction inputs for "*c".

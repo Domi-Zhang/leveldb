@@ -46,6 +46,7 @@ Block::Block(const BlockContents& contents)
       // The size is too small for NumRestarts()
       size_ = 0;
     } else {
+      // 这里的1是block末尾的numRestarts(uint32)
       restart_offset_ = size_ - (1 + NumRestarts()) * sizeof(uint32_t);
     }
   }
@@ -80,6 +81,8 @@ static inline const char* DecodeEntry(const char* p, const char* limit,
     if ((p = GetVarint32Ptr(p, limit, value_length)) == nullptr) return nullptr;
   }
 
+  // 现在P指针之后是 non_shared content (len=non_shared)和 value content(len=value_length)
+  // 所以如果p+(*non_shared + *value_length)>limit，那就是非法越界了
   if (static_cast<uint32_t>(limit - p) < (*non_shared + *value_length)) {
     return nullptr;
   }
@@ -172,6 +175,8 @@ class Block::Iter : public Iterator {
     SeekToRestartPoint(restart_index_);
     do {
       // Loop until end of current entry hits the start of original entry
+      // ParseNextKey()是移动到下一个key，是获取“移动后的key”的下一个key的位置，当它大于
+      // 等于original的时候，那么刚刚移动到的key就是我们想要的prev
     } while (ParseNextKey() && NextEntryOffset() < original);
   }
 
@@ -205,6 +210,7 @@ class Block::Iter : public Iterator {
       const char* key_ptr =
           DecodeEntry(data_ + region_offset, data_ + restarts_, &shared,
                       &non_shared, &value_length);
+      // 现在找的都是restart point，shared应该是0
       if (key_ptr == nullptr || (shared != 0)) {
         CorruptionError();
         return;
@@ -279,9 +285,11 @@ class Block::Iter : public Iterator {
       CorruptionError();
       return false;
     } else {
+      // 每到restart point，shared都会归0,此时的non_shared==key，相当于key_重置为current key
       key_.resize(shared);
       key_.append(p, non_shared);
       value_ = Slice(p + non_shared, value_length);
+      // 判断如果下一个restart point比当前游标(current_)要小，说明应该切换restart_index_了
       while (restart_index_ + 1 < num_restarts_ &&
              GetRestartPoint(restart_index_ + 1) < current_) {
         ++restart_index_;

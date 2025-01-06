@@ -14,6 +14,8 @@ namespace leveldb {
 
 struct Options;
 
+// block builder本身是由状态机(counter、finished等)及buffer(std::string)组成，主要提供
+// Add(k,v)和Flush方法(返回std::string)
 class BlockBuilder {
  public:
   explicit BlockBuilder(const Options* options);
@@ -45,7 +47,7 @@ class BlockBuilder {
   std::string buffer_;              // Destination buffer
   // restart points的目的是，为了加速key的查询，如果没有这些point, 一次查询需要从fisrt entry, 一直apply到seek点
   // 但是有restart points之后，可以首先binary search对应的key在那个range，然后再顺序查找一遍
-  std::vector<uint32_t> restarts_;  // Restart points
+  std::vector<uint32_t> restarts_;  // Restart points，每个元素是block中的字节offset
   int counter_;                     // Number of entries emitted since restart
   bool finished_;                   // Has Finish() been called?
   std::string last_key_;
