@@ -187,6 +187,7 @@ class DBImpl : public DB {
   std::deque<Writer*> writers_ GUARDED_BY(mutex_);
   WriteBatch* tmp_batch_ GUARDED_BY(mutex_);
 
+  // 在DB::GetSnapshot接口中触发创建
   SnapshotList snapshots_ GUARDED_BY(mutex_);
 
   // Set of table files to protect from deletion because they are
