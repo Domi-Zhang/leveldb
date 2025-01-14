@@ -11,7 +11,8 @@
 namespace leveldb {
 
 namespace {
-// MergingIter的实现也是非常优秀，可以参考
+// FindSmallest从0开始向后遍历内部Iterator数组，找到key最小的Iterator，并设置到current_；
+// FindLargest从最后一个向前遍历内部Iterator数组，找到key最大的Iterator，并设置到current_；
 class MergingIterator : public Iterator {
  public:
   MergingIterator(const Comparator* comparator, Iterator** children, int n)
@@ -95,6 +96,10 @@ class MergingIterator : public Iterator {
           child->Seek(key());
           if (child->Valid()) {
             // Child is at first entry >= key().  Step back one to be < key()
+            // 如果这个child的所有key都是>key()的，则Prev()之后会使其Valid()=false，在
+            // 下面的FindLargest()方法中被过滤掉不参与current_的设置；
+            // 如果这个child有key==key()，则Prev()之后就(可能)会是一个比key()更小的key，
+            // 下面的FindLargest()方法会重新选择一个合适的child作为_current
             child->Prev();
           } else {
             // Child has no entries >= key().  Position at last entry.
@@ -105,7 +110,10 @@ class MergingIterator : public Iterator {
       direction_ = kReverse;
     }
 
+    // 调整current_内部的指针
     current_->Prev();
+    // 让所有的child(包括current_)一起重新比较获得新的current_，之后的Key()就可以从
+    // current_->key()中获取了
     FindLargest();
   }
 

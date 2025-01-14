@@ -54,9 +54,12 @@ int InternalKeyComparator::Compare(const Slice& akey, const Slice& bkey) const {
   //    decreasing type (though sequence# should be enough to disambiguate)
   int r = user_comparator_->Compare(ExtractUserKey(akey), ExtractUserKey(bkey));
   if (r == 0) {
+    // 注意这里是DecodeFixed64(...-8)，意思是sequence number和type一起参与排序，如果
+    // sequence number一样，那么就是type参与排序，排序规则和sequence number一样（倒序）
     const uint64_t anum = DecodeFixed64(akey.data() + akey.size() - 8);
     const uint64_t bnum = DecodeFixed64(bkey.data() + bkey.size() - 8);
     if (anum > bnum) {
+      // 大的sequence number和type排前面
       r = -1;
     } else if (anum < bnum) {
       r = +1;
