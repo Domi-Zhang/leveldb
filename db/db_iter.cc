@@ -170,6 +170,9 @@ void DBIter::Next() {
 
     // iter_ is pointing to current key. We can now safely move to the next to
     // avoid checking current key.
+    // DbIter::key()方法，在direction_ = kForward时取的是iter_->key()，所以此时
+    // saved_key中存储的其实是上一条Key，iter_->Next()方法让指针往后移动一次，指向下一个key，
+    // 同时会通过FindNextUserEntry跳过更小的version或被deleted的记录
     iter_->Next();
     if (!iter_->Valid()) {
       valid_ = false;
@@ -181,6 +184,8 @@ void DBIter::Next() {
   FindNextUserEntry(true, &saved_key_);
 }
 
+// skipping-是否要跳过同user_key但sequence_num更小的记录，skip-存储被跳过的user_key
+// skip在方法进来的时候，设置的是上一条记录的key，这是个双向参数
 void DBIter::FindNextUserEntry(bool skipping, std::string* skip) {
   // Loop until we hit an acceptable entry to yield
   assert(iter_->Valid());
