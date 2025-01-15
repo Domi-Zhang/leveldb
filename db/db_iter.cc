@@ -118,15 +118,20 @@ class DBIter : public Iterator {
   Direction direction_;
   bool valid_;
   Random rnd_;
+  // 在下一次compaction之前剩余的可读字节数
   size_t bytes_until_read_sampling_;
 };
 
+// 读取iter_指向的key/value，其中可能会触发compaction
 inline bool DBIter::ParseKey(ParsedInternalKey* ikey) {
   Slice k = iter_->key();
 
   size_t bytes_read = k.size() + iter_->value().size();
+  // 剩余可读字节数已经小于本次要读的数据长度了
   while (bytes_until_read_sampling_ < bytes_read) {
+    // 复位可读字节数
     bytes_until_read_sampling_ += RandomCompactionPeriod();
+    // 记录当前这次读取的字节数，这个方法内部(可能)会触发compaction
     db_->RecordReadSample(k);
   }
   assert(bytes_until_read_sampling_ >= bytes_read);
@@ -187,6 +192,9 @@ void DBIter::FindNextUserEntry(bool skipping, std::string* skip) {
         case kTypeDeletion:
           // Arrange to skip all upcoming entries for this key since
           // they are hidden by this deletion.
+          // ikey有user_key、sequence和type三个字段，按照user_key正序、sequence和type
+          // 降序排列。当读到一个type=kTypeDeletion时，后面同user_key（注意是user_key不
+          // 是ikey）就意味着已经被删掉了，需要skip掉
           SaveKey(ikey.user_key, skip);
           skipping = true;
           break;
@@ -194,7 +202,9 @@ void DBIter::FindNextUserEntry(bool skipping, std::string* skip) {
           if (skipping &&
               user_comparator_->Compare(ikey.user_key, *skip) <= 0) {
             // Entry hidden
+            // 这里的<似乎不太需要？因为user_key已经是单调递增的
           } else {
+            // 如果不跳过(skipping==false)或者user_key已经切换到下一条，则停止遍历
             valid_ = true;
             saved_key_.clear();
             return;

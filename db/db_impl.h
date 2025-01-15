@@ -187,6 +187,7 @@ class DBImpl : public DB {
   std::deque<Writer*> writers_ GUARDED_BY(mutex_);
   WriteBatch* tmp_batch_ GUARDED_BY(mutex_);
 
+  // 在DB::GetSnapshot接口中触发创建
   SnapshotList snapshots_ GUARDED_BY(mutex_);
 
   // Set of table files to protect from deletion because they are
@@ -201,6 +202,8 @@ class DBImpl : public DB {
   VersionSet* const versions_ GUARDED_BY(mutex_);
 
   // Have we encountered a background error in paranoid mode?
+  // 直接存储运行过程中encounter的status，所以当bg_error_.ok()==true时，说明状态是正常的
+  // 而当bg_error_.ok()==false时表示出错了，跟运行过程中遇到的status是一样的
   Status bg_error_ GUARDED_BY(mutex_);
 
   // 统计信息，compaction的状态是核心指标
