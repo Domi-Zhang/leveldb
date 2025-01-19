@@ -51,7 +51,7 @@ class DBIter : public Iterator {
          uint32_t seed)
       : db_(db),
         user_comparator_(cmp),
-        iter_(iter),
+        iter_(iter), // 在当前实现中,iter_始终只有MergingIterator这一种
         sequence_(s),
         direction_(kForward),
         valid_(false),
