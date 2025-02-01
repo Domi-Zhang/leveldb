@@ -37,7 +37,13 @@ namespace {
 // representation into a single entry while accounting for sequence
 // numbers, deletion markers, overwrites, etc.
 
-// 思考：全局的迭代器如何实现？
+// DBIter 有一个特性如下： 执行完 Prev 后迭代器的saved_key 即是迭代器当前的 user_key，而
+// 指针指示的位置是当前 saved_key 节点的上一个节点(Prev 方向)。 这一点不同于 Next，Next
+// 的指针所指位置的 user_key 即是迭代器当前的 user_key。 造成这个不同的关键原因是:
+// Internalkey 排序规则是 Internal key 的排序规则: user_key 正序 -->
+// sequence number 逆序 --> type 逆序，那么相同 user_key 的更新的版本会排在前面
+// (Prev 方向), 所以要找到当前 user_key 的前面一个有效 user_key, 必须要把 user_key
+// 的所有节点都遍历完, 才会得知这个 user_key 是否没有被删除, 或是否有更新版本的值。
 class DBIter : public Iterator {
  public:
   // Which direction is the iterator currently moving?
@@ -110,7 +116,7 @@ class DBIter : public Iterator {
 
   DBImpl* db_;
   const Comparator* const user_comparator_;
-  Iterator* const iter_;
+  Iterator* const iter_; // 在当前实现中,iter_始终只有MergingIterator这一种
   SequenceNumber const sequence_;
   Status status_;
   std::string saved_key_;    // == current key when direction_==kReverse
@@ -184,8 +190,11 @@ void DBIter::Next() {
   FindNextUserEntry(true, &saved_key_);
 }
 
-// skipping-是否要跳过同user_key但sequence_num更小的记录，skip-存储被跳过的user_key
-// skip在方法进来的时候，设置的是上一条记录的key，这是个双向参数
+// 不断查看iter_当前的key，判断其是否需要跳过(例如deleted或更小的seq_num)，如果是的话就让
+// iter_-Next()，否则退出。也就是这个方法的核心是Next()，并不返回什么值。
+// skipping- 是否要跳过同user_key但sequence_num更小的记录，skip-存储被跳过的user_key
+// skip- 在方法进来的时候，设置的是上一条记录的key，在方法退出的时候存的是被跳过的key(如果发
+// 生了skip)，这是个双向参数
 void DBIter::FindNextUserEntry(bool skipping, std::string* skip) {
   // Loop until we hit an acceptable entry to yield
   assert(iter_->Valid());
@@ -231,6 +240,8 @@ void DBIter::Prev() {
     // the key changes so we can use the normal reverse scanning code.
     assert(iter_->Valid());  // Otherwise valid_ would have been false
     SaveKey(ExtractUserKey(iter_->key()), &saved_key_);
+    // 此时saved_key_指向的是iter_->key()，我们需要不断调用iter_->Prev()，使其指向上一个
+    // 不一样的user_key，逻辑可以参见FindPrevUserEntry()函数
     while (true) {
       iter_->Prev();
       if (!iter_->Valid()) {
@@ -239,6 +250,11 @@ void DBIter::Prev() {
         ClearSavedValue();
         return;
       }
+      // 这里等同于FindPrevUserEntry()函数中while的停止条件：
+      // if ((value_type != kTypeDeletion) &&
+      //            user_comparator_->Compare(ikey.user_key, saved_key_) < 0)
+      // kForward时当前value_type肯定不是kTypeDeletion，所以可以忽略此条件，即成为下面这
+      // 条判断语句。
       if (user_comparator_->Compare(ExtractUserKey(iter_->key()), saved_key_) <
           0) {
         break;
@@ -261,6 +277,12 @@ void DBIter::FindPrevUserEntry() {
         if ((value_type != kTypeDeletion) &&
             user_comparator_->Compare(ikey.user_key, saved_key_) < 0) {
           // We encountered a non-deleted value in entries for previous keys,
+          // 这个if分支表示遍历到了<更前一位>的user key，且刚刚遍历到的kv是有效的(第一个判
+          // 断条件)，而且由于seq_num的倒序排列的特点，刚刚遍历到的user_key就是最新的，
+          // 这意味着我们可以跳出while，此时想要的user_key存储在saved_key_中，（而不是像
+          // kForward，直接存储在iter_->key()）。
+          // 记住ikey=user_key(正序)+seq_num(倒序)+type(倒序)，只有当相同的user_key
+          // 遍历完了才能决定这个user_key的最新值、是否被deleted了
           break;
         }
         value_type = ikey.type;
