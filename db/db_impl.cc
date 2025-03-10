@@ -1336,9 +1336,8 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
   // 还有一种可能是队列头的请求
   // 此时肯定是持有lock的状态
 
-  // May temporarily unlock and wait.
-  // 写之前需要检查条件是否符合条件
-  // 有一些情况下，写请求是需要等待的，主要是compaction的影响
+  // 根据当前MemTable的使用率来选择是否触发Minor Compaction（如果当前updates为空，
+  // 则为Manual Compaction用来强制触发Minor Compaction的操作）
   Status status = MakeRoomForWrite(updates == nullptr);
   uint64_t last_sequence = versions_->LastSequence();
   Writer* last_writer = &w;
