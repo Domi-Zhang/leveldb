@@ -1338,7 +1338,8 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
 
   // May temporarily unlock and wait.
   // 写之前需要检查条件是否符合条件，例如memtable是否过大，l0 sst file数量是否过多，这些情
-  // 况下写请求是需要等待的
+  // 况下写请求是需要等待或发起异步Compact。
+  // （如果当前updates为空，则强制Compact）
   Status status = MakeRoomForWrite(updates == nullptr);
   uint64_t last_sequence = versions_->LastSequence();
   Writer* last_writer = &w;
