@@ -75,6 +75,7 @@ void PutVarint64(std::string* dst, uint64_t v) {
 }
 
 void PutLengthPrefixedSlice(std::string* dst, const Slice& value) {
+  // 用的是append
   PutVarint32(dst, value.size());
   dst->append(value.data(), value.size());
 }

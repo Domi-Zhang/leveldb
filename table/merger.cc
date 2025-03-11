@@ -158,11 +158,16 @@ class MergingIterator : public Iterator {
   Direction direction_;
 };
 
+// 这个方法必须在各个children_调用了Seek、SeekToFirst等方法后才有效，可以参见上面的实现，确实
+// 是先调用Seek、SeekToFirst等方法
 void MergingIterator::FindSmallest() {
   IteratorWrapper* smallest = nullptr;
   for (int i = 0; i < n_; i++) {
     IteratorWrapper* child = &children_[i];
     if (child->Valid()) {
+      // Iterator的Seek()方法会讲内部node_指向第一个大于等于Key的Entry，没有找到则设置为
+      // nullptr。Valid()方法就是判断node_是不是nullptr，这里的if就会跳过小于且没有找到Key
+      // 的IteratorWrapper，从大于等于Key的Entry开始遍历
       if (smallest == nullptr) {
         smallest = child;
       } else if (comparator_->Compare(child->key(), smallest->key()) < 0) {

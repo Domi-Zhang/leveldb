@@ -1336,8 +1336,9 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
   // 还有一种可能是队列头的请求
   // 此时肯定是持有lock的状态
 
-  // 根据当前MemTable的使用率来选择是否触发Minor Compaction（如果当前updates为空，
-  // 则为Manual Compaction用来强制触发Minor Compaction的操作）
+  // May temporarily unlock and wait.
+  // 写之前需要检查条件是否符合条件，例如memtable是否过大，l0 sst file数量是否过多，这些情
+  // 况下写请求是需要等待的
   Status status = MakeRoomForWrite(updates == nullptr);
   uint64_t last_sequence = versions_->LastSequence();
   Writer* last_writer = &w;
@@ -1474,12 +1475,6 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       // individual write by 1ms to reduce latency variance.  Also,
       // this delay hands over some CPU to the compaction thread in
       // case it is sharing the same core as the writer.
-      // 这里的mutex_在"MemTable dump"、"L0 compact"等场景下都会用到，所以此处的Unlock能
-      // 够把所有权让渡给其他线程执行任务。这是不是意味着MakeRoomForWrite方法会由多个线程交叉
-      // 执行？比如方法入口mutex_.AssertHeld()在sleep之后可能就不满足此断言了？
-      // 答案是不会，因为此方法只会由DBImpl::Write为入口被调用，调用前的判断条件
-      // “w != writers_.front()”确保了其他调用DBImpl::Write的线程即使获得了锁，也会进入
-      // Wait状态，只有当前(sleep的)线程才会获得mutex_的所有权
       mutex_.Unlock();
       env_->SleepForMicroseconds(1000);
       allow_delay = false;  // Do not delay a single write more than once
