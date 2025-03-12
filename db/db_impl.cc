@@ -1457,7 +1457,14 @@ WriteBatch* DBImpl::BuildBatchGroup(Writer** last_writer) {
 }
 
 // REQUIRES: mutex_ is held
-// REQUIRES: this thread is currently at the front of the writer queue
+// REQUIRES: this thread is currently at the front of the writer queue（因为方法
+// 中会短暂解锁，如果没有这条REQUIRES可能出现线程交叉并行的问题）
+// 此方法的执行逻辑：
+//  1. 检查L0文件是否过多，当大于kL0_SlowdownWritesTrigger时让当前线程sleep 1ms后重新执行
+//  2. 检查Immutable MemTable是否存在（说明上一个MemTable正在dump），或L0文件是否大于
+//    kL0_StopWritesTrigger，如果是则等待信号量
+//  3. 检查MemTable使用量是否大于write_buffer_size，如果是的话执行MemTable切换并dump(可能
+//    会同时触发L0 Compact)
 Status DBImpl::MakeRoomForWrite(bool force) {
   mutex_.AssertHeld();
   assert(!writers_.empty());
@@ -1485,19 +1492,16 @@ Status DBImpl::MakeRoomForWrite(bool force) {
       // There is room in current memtable
       break;
     } else if (imm_ != nullptr) {
-      // memory写满了，并且还有immutable memtable
+      // memory写满了，并且还有immutable memtable（说明上一个MemTable还在Compact中）
       // 检查是否需要Minor compaction
-      // We have filled up the current memtable, but the previous
-      // one is still being compacted, so we wait.
       Log(options_.info_log, "Current memtable full; waiting...\n");
       background_work_finished_signal_.Wait();
     } else if (versions_->NumLevelFiles(0) >= config::kL0_StopWritesTrigger) {
-      // 这是leveldb引入的一些策略，这里表示如果L0层的文件过多，需要阻塞写， 等待memtable的compaction完成
-      // todo,这是什么逻辑？
-      // There are too many level-0 files.
+      // 如果L0层的文件过多，需要阻塞写，等待memtable的compaction完成
       Log(options_.info_log, "Too many L0 files; waiting...\n");
       background_work_finished_signal_.Wait();
     } else {
+      // MemTable空间不够了，但是L0的文件也还没有过多，执行"MemTable" > "L0 sst file"
       // Attempt to switch to a new memtable and trigger compaction of old
       assert(versions_->PrevLogNumber() == 0);
       uint64_t new_log_number = versions_->NewFileNumber();
