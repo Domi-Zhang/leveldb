@@ -58,9 +58,17 @@ bool SomeFileOverlapsRange(const InternalKeyComparator& icmp,
                            const Slice* largest_user_key);
 
 // Manifest、VersionEdit、Version、VersionSet之间的关系：
-// Manifest中存储的格式是VersionEdit，读取Manifest文件(例如Recover)后得到的是
-// VersionEdit，它会被Apply到VersionSet::Builder生成一个新的Version加入到VersionSet，
-// 并设置VersionSet::current_为这个最新的Version
+
+//    Version的关键成员是std::vector<FileMetaData*> files_[config::kNumLevels]，整个
+//    Version就是指向一堆sst file的集合。
+
+//    VersionSet的关键成员是log::Writer* descriptor_log_和Version* current_，它一方面指
+//    向Version用于数据读取和数据文件管理，另一方面在Version的基础上建立一系列操作对象，例如持有一个
+//    加速读取的TableCache、持有一个sst file的Writer用于MemTable dump。
+
+//    Manifest中存储的格式是VersionEdit，读取Manifest文件(例如Recover)后得到的是
+//    VersionEdit，它会被Apply到VersionSet::Builder生成一个新的Version加入到VersionSet，
+//    并设置VersionSet::current_为这个最新的Version。
 class Version {
  public:
   struct GetStats {
@@ -308,6 +316,7 @@ class VersionSet {
   const InternalKeyComparator icmp_;
   uint64_t next_file_number_;
   uint64_t manifest_file_number_;
+  // 当前最大的log number
   uint64_t last_sequence_;
   uint64_t log_number_;
   uint64_t prev_log_number_;  // 0 or backing store for memtable being compacted
