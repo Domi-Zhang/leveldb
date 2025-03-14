@@ -1341,6 +1341,7 @@ Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
   // 况下写请求是需要等待或发起异步Compact。
   // （如果当前updates为空，则强制Compact）
   Status status = MakeRoomForWrite(updates == nullptr);
+  // 获取当前version的最大log number
   uint64_t last_sequence = versions_->LastSequence();
   Writer* last_writer = &w;
   if (status.ok() && updates != nullptr) {  // nullptr batch is for compactions

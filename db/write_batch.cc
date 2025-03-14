@@ -84,6 +84,7 @@ Status WriteBatch::Iterate(Handler* handler) const {
 }
 
 int WriteBatchInternal::Count(const WriteBatch* b) {
+  // rep_开是头64位seq number，然后是32位的count
   return DecodeFixed32(b->rep_.data() + 8);
 }
 
