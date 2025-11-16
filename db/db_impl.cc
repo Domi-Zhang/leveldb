@@ -1309,7 +1309,15 @@ Status DBImpl::Delete(const WriteOptions& options, const Slice& key) {
   return DB::Delete(options, key);
 }
 
-// write操作提供了write batch的接口
+// 在将数据写入预写日志文件之前，需要循环确认 leveldb 的状态，主要包括 MemTable 是否达到最大容量、Level-0 中的文件数是否已经达到某个阈值等。如果 MemTable 已经达到了最大容量，并且此时 Immutable MemTable 仍未 flush 到硬盘时，leveldb 将会等待后台线程完成其相关工作。这些判断均在 MakeRoomForWrite() 方法中进行:
+//    如果当前 Level-0 层的 SSTable 数量已经达到了阈值 kL0_SlowdownWritesTrigger（默认为 8），则会调用 std::this_thread::sleep_for() 方法延迟 1 毫秒写入，该延迟写入只会进行 1 次。 如果当前 MemTable 容量没有达到最大大小（write_buffer_size，默认为 4MB）则允许写入，返回 OK 状态的 Status。 如果 MemTable 已达到最大容量，并且 Immutable MemTable 仍存在的话，就需要等待 Compaction 完成。 如果 Level-0 层的 SSTable 数量已经达到了阈值 kL0_StopWritesTrigger（默认为 12），同样需要等待 Compaction 完成。
+//    最后，当 MemTable 以达到最大容量，并且 Immutable MemTable 不存在时，就需要将 Memtable 主动地变更为 Immutable MemTable，并初始化一个新的 MemTable 和日志文件，并主动地触发 Minor Compaction，可能会创建一个新的线程执行，同时允许写入。
+// 当 MakeRoomForWrite() 方法调用返回时，不管之前发生了什么，现在的 MemTable 一定是有剩余容量并且 Level-0 的文件数量大概率小于 4，所以可以进行接下来的写入流程。
+// 而后，我们需要获取最新的 Sequence Number，并将 last_sequence + 1 写入到 write_batch 的起始位置上，而后就可以写预写日志了。
+// 在写完预写日志以后，会根据 options.sync 的值来决定是否调用 fsync() 进行刷盘，成功以后就会将 write_batch 中数据写入至 Skip List 所实现的 MemTable 中。
+// 这个过程在 WriteBatch::Iterate() 方法中进行，遍历 rep_ 中打包好的 K-V，逐一地调用 MemTable::Add() 方法，MemTable Entry 所需要的“四元素”均会由外部传入，在 MemTable::Add() 方法内部将会调用相关的编码函数将其打包成 MemTable Entry 的格式插入到 Skip List 中。MemTable Entry 格式具体可见本篇文章开头部分。
+// 最后，leveldb 将会更新全局的 Sequence Number，其值就是原来的 Sequence Number 再加上此次 write_batch 写入的 K-V 数量。
+//
 // 单个db单线程写，通过合并写操作，可以减少写延迟(减少redolog的写入次数)
 // 而且写入模型也比较简单, 可以想象如何支持多线程写, 可能会存在顺序的问题(更新sequence的问题)
 Status DBImpl::Write(const WriteOptions& options, WriteBatch* updates) {
